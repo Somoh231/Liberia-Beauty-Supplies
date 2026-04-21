@@ -1,0 +1,359 @@
+@import "tailwindcss";
+
+/* Tailwind content: entire `src/` tree (app + components + lib). */
+@source "../**/*.{js,ts,jsx,tsx,mdx}";
+@source "./**/*.{js,ts,jsx,tsx,mdx}";
+
+/* -------------------------------------------------------------------------- */
+/* Design tokens — luxury beauty × calm SaaS × editorial restraint            */
+/* -------------------------------------------------------------------------- */
+:root {
+  /* Webfonts: loaded via `<link>` in `layout.tsx` (browser). Stacks keep text readable if the CDN is blocked. */
+  --font-sans: "Poppins", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Playfair Display", ui-serif, Georgia, "Palatino Linotype", Palatino, "Book Antiqua",
+    "Times New Roman", serif;
+
+  /* Brand palette — salon interior: blush, gold, marble cream, luxury black */
+  --brand-gold: #d4af37;
+  --brand-blush: #f7d6e0;
+  --brand-rose: #efa3b1;
+  --brand-cream: #faf7f2;
+  --brand-black: #111111;
+
+  --bg: #faf7f2;
+  --bg-elevated: #fffcfa;
+  --bg-subtle: color-mix(in srgb, var(--brand-blush) 38%, var(--brand-cream));
+  --fg: #111111;
+  --fg-muted: #6b6b6b;
+  --fg-subtle: rgba(107, 107, 107, 0.72);
+
+  --accent: #d4af37;
+  --accent-hover: #e0bd4d;
+  --accent-soft: rgba(212, 175, 55, 0.18);
+  --accent-deep: #5c4a1f;
+  --accent-glow: rgba(212, 175, 55, 0.38);
+
+  --line: rgba(17, 17, 17, 0.08);
+  --line-strong: rgba(17, 17, 17, 0.14);
+  --wash: color-mix(in srgb, var(--brand-blush) 45%, var(--brand-cream));
+
+  --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.85) inset, 0 1px 2px rgba(17, 17, 17, 0.04);
+  --shadow-md: 0 24px 48px -28px rgba(17, 17, 17, 0.1), 0 12px 28px -18px rgba(17, 17, 17, 0.06);
+  --shadow-lg: 0 36px 72px -32px rgba(17, 17, 17, 0.14), 0 18px 40px -24px rgba(17, 17, 17, 0.08);
+  --shadow-float: 0 40px 80px -36px rgba(17, 17, 17, 0.16), 0 20px 48px -26px rgba(212, 175, 55, 0.14);
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --radius-2xl: 1.75rem;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --duration: 240ms;
+  --duration-fast: 160ms;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Admin shell (scoped)                                                       */
+/* -------------------------------------------------------------------------- */
+[data-app="admin"] {
+  --admin-accent: #d4b896;
+  --admin-accent-soft: rgba(212, 184, 150, 0.14);
+  --admin-accent-dim: rgba(212, 184, 150, 0.12);
+  --admin-fg: #f7f4ef;
+  --admin-fg-muted: rgba(247, 244, 239, 0.52);
+  --admin-line: rgba(247, 244, 239, 0.09);
+  --admin-line-bright: rgba(247, 244, 239, 0.14);
+  --admin-surface: #070708;
+  --admin-elevated: #101014;
+  --admin-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 32px 72px -40px rgba(0, 0, 0, 0.85);
+  --admin-shadow-soft: 0 20px 48px -36px rgba(0, 0, 0, 0.55);
+  --admin-shadow-lift: 0 28px 56px -36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(212, 184, 150, 0.06);
+  /* Sticky toolbars clear the blurred admin header */
+  --admin-chrome-stack: 5.85rem;
+}
+
+@media (min-width: 640px) {
+  [data-app="admin"] {
+    --admin-chrome-stack: 4.55rem;
+  }
+}
+
+[data-app="admin"] .admin-card {
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--admin-line);
+  background: linear-gradient(
+    165deg,
+    rgba(22, 22, 28, 0.96) 0%,
+    rgba(14, 14, 18, 0.94) 48%,
+    rgba(10, 10, 12, 0.92) 100%
+  );
+  box-shadow: var(--admin-shadow);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+[data-app="admin"] .admin-card-interactive:hover {
+  border-color: color-mix(in srgb, var(--admin-accent) 28%, var(--admin-line));
+  box-shadow: var(--admin-shadow), 0 0 0 1px color-mix(in srgb, var(--admin-accent) 12%, transparent);
+}
+
+[data-app="admin"] .admin-well {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--admin-line);
+  background: rgba(6, 6, 8, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+[data-app="admin"] .admin-table-row {
+  transition:
+    background-color 0.18s var(--ease-out),
+    box-shadow 0.22s var(--ease-out);
+}
+
+[data-app="admin"] .admin-table-row:hover {
+  background-color: rgba(255, 255, 255, 0.034);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+[data-app="admin"] .admin-table-row:active {
+  background-color: rgba(255, 255, 255, 0.042);
+}
+
+[data-app="admin"] .admin-x-scroll {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-color: color-mix(in srgb, var(--admin-accent) 35%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+[data-app="admin"] .admin-card-lift {
+  transition:
+    transform 0.28s var(--ease-out),
+    border-color 0.28s var(--ease-out),
+    box-shadow 0.28s var(--ease-out);
+}
+
+[data-app="admin"] .admin-card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--admin-shadow-lift);
+  border-color: color-mix(in srgb, var(--admin-accent) 22%, var(--admin-line));
+}
+
+[data-app="admin"] .admin-btn-primary {
+  border: 1px solid color-mix(in srgb, var(--admin-accent) 48%, var(--admin-line));
+  background: linear-gradient(165deg, color-mix(in srgb, var(--admin-accent) 18%, transparent), rgba(0, 0, 0, 0.2));
+  color: var(--admin-accent);
+  box-shadow: 0 14px 40px -22px color-mix(in srgb, var(--admin-accent) 55%, transparent);
+  transition:
+    transform 0.18s var(--ease-out),
+    border-color 0.18s var(--ease-out),
+    background 0.18s var(--ease-out),
+    box-shadow 0.22s var(--ease-out);
+}
+
+[data-app="admin"] .admin-btn-primary:hover {
+  border-color: color-mix(in srgb, var(--admin-accent) 62%, var(--admin-line));
+  background: linear-gradient(165deg, color-mix(in srgb, var(--admin-accent) 26%, transparent), rgba(0, 0, 0, 0.18));
+  box-shadow: 0 18px 48px -24px color-mix(in srgb, var(--admin-accent) 50%, transparent);
+}
+
+[data-app="admin"] .admin-btn-primary:active {
+  transform: scale(0.98);
+}
+
+[data-app="admin"] .admin-field {
+  transition:
+    border-color 0.18s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    background-color 0.18s var(--ease-out);
+}
+
+[data-app="admin"] :where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--admin-accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+@keyframes admin-dropdown-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+[data-app="admin"] .admin-dropdown-in {
+  animation: admin-dropdown-in 0.2s var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-app="admin"] .admin-card-lift,
+  [data-app="admin"] .admin-card-lift:hover {
+    transform: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  [data-app="admin"] .admin-btn-primary,
+  [data-app="admin"] .admin-btn-primary:active {
+    transform: none;
+  }
+
+  [data-app="admin"] .admin-dropdown-in {
+    animation: none;
+  }
+
+  [data-app="admin"] .admin-table-row,
+  [data-app="admin"] .admin-table-row:active {
+    transition: background-color 0.12s ease;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Marketing surfaces                                                         */
+/* -------------------------------------------------------------------------- */
+.marketing-card {
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--bg-elevated) 0%, color-mix(in srgb, var(--bg-elevated) 90%, var(--wash)) 100%);
+  box-shadow: var(--shadow-md);
+  transition:
+    transform var(--duration) var(--ease-out),
+    box-shadow var(--duration) var(--ease-out),
+    border-color var(--duration) var(--ease-out);
+}
+
+.marketing-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-float);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing-card {
+    transition: border-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease;
+  }
+  .marketing-card:hover {
+    transform: none;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Motion primitives                                                          */
+/* -------------------------------------------------------------------------- */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes hero-ken {
+  from {
+    transform: scale(1.04);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.7s var(--ease-out) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.55s var(--ease-out) both;
+}
+
+.animate-hero-image {
+  animation: hero-ken 1.4s var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-fade-in,
+  .animate-hero-image {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(ellipse 88% 58% at 100% -6%, color-mix(in srgb, var(--brand-blush) 85%, transparent), transparent 52%),
+    radial-gradient(ellipse 48% 42% at 0% 102%, color-mix(in srgb, var(--brand-gold) 14%, transparent), transparent 54%),
+    linear-gradient(180deg, var(--brand-cream) 0%, color-mix(in srgb, var(--brand-blush) 12%, var(--brand-cream)) 100%);
+  color: var(--fg);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 3px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Admin weekly log — print                                                   */
+/* -------------------------------------------------------------------------- */
+@media print {
+  [data-app="admin"] {
+    background: #fff !important;
+    color: #0c0b0a !important;
+  }
+
+  [data-app="admin"] [class*="fixed"][class*="inset-0"] {
+    display: none !important;
+  }
+
+  [data-app="admin"] main {
+    padding-top: 1rem !important;
+    padding-bottom: 1rem !important;
+  }
+
+  [data-app="admin"] .admin-card,
+  [data-app="admin"] [class*="admin-card"] {
+    box-shadow: none !important;
+    border-color: rgba(12, 11, 10, 0.12) !important;
+    background: #fff !important;
+    color: #0c0b0a !important;
+  }
+
+  [data-app="admin"] .admin-table-row:hover {
+    background: transparent !important;
+  }
+}

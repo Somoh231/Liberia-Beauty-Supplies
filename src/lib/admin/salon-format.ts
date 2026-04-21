@@ -1,0 +1,44 @@
+export type SalonCurrency = "USD" | "LRD" | "NGN";
+
+export type StockStatus = "in_stock" | "low_stock" | "out_of_stock";
+
+export function getMonroviaDayKey(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Monrovia",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+export function formatSalonMoney(minorUnits: number, currency: SalonCurrency): string {
+  const locale =
+    currency === "USD" ? "en-US" : currency === "NGN" ? "en-NG" : "en-LR";
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(minorUnits / 100);
+}
+
+/** Parse major units (e.g. 9500 NGN) to minor (kobo / cents). */
+export function parseMoneyToCents(raw: string | undefined | null): number | null {
+  if (raw == null || raw === "") return null;
+  const n = Number(String(raw).replace(/,/g, "").trim());
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100);
+}
+
+export function parseQty(raw: string | number | undefined | null): number | null {
+  if (raw === "" || raw == null) return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
+export function normalizeCurrency(raw: string | undefined | null): SalonCurrency {
+  const u = (raw ?? "NGN").toUpperCase();
+  if (u === "USD" || u === "LRD" || u === "NGN") return u;
+  return "NGN";
+}

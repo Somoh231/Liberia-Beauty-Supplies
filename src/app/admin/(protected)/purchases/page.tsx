@@ -3,10 +3,15 @@ import Link from "next/link";
 import { SalonReceivePurchaseButton } from "@/components/admin/salon-receive-purchase-button";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchAllSuppliersAdmin, fetchPurchases } from "@/lib/admin/salon-queries";
+import { isSalonStaffRole, requireAdminContext } from "@/lib/auth/admin-context";
+import { redirect } from "next/navigation";
 export const metadata: Metadata = { title: "Purchases" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminPurchasesPage() {
+  const ctx = await requireAdminContext();
+  if (isSalonStaffRole(ctx.roleSlug)) redirect("/admin/inventory");
+
   const supabase = await createSupabaseServerClient();
   const [purchases, suppliers] = await Promise.all([fetchPurchases(supabase, 60), fetchAllSuppliersAdmin(supabase)]);
   const supplierName = Object.fromEntries(suppliers.map((s) => [s.id, s.name]));

@@ -1,7 +1,9 @@
 "use server";
 
-import { getAdminContext } from "@/lib/auth/admin-context";
+import type { AdminContext } from "@/lib/auth/admin-context";
+import { getAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 import { normalizeCurrency, parseMoneyToCents, parseQty, type SalonCurrency } from "@/lib/admin/salon-format";
+import { effectiveUnitCostUsdCents, lineRevenueUsdEquivCents } from "@/lib/admin/salon-finance";
 import { fetchInventoryItem } from "@/lib/admin/salon-queries";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -19,9 +21,28 @@ function revalidateSalon() {
   revalidatePath("/admin/inventory");
   revalidatePath("/admin/purchases");
   revalidatePath("/admin/sales");
+  revalidatePath("/admin/sales/new");
   revalidatePath("/admin/services");
+  revalidatePath("/admin/services/new");
   revalidatePath("/admin/suppliers");
   revalidatePath("/admin/sales-log");
+}
+
+function staffForbidden(): SalonActionResult {
+  return { ok: false, error: "forbidden_staff_role" };
+}
+
+function requireNotStaff(ctx: AdminContext | null): SalonActionResult | null {
+  if (!ctx) return { ok: false, error: "unauthorized" };
+  if (isSalonStaffRole(ctx.roleSlug)) return staffForbidden();
+  return null;
+}
+
+function parseFxNgnPerUsd(raw: string | undefined | null): number | null {
+  if (raw == null || raw === "") return null;
+  const n = Number(String(raw).replace(/,/g, "").trim());
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
 }
 
 export async function createSupplierAction(input: {
@@ -31,9 +52,11 @@ export async function createSupplierAction(input: {
   phone?: string | null;
   countryOrigin?: string | null;
   notes?: string | null;
+  productCategory?: string | null;
 }): Promise<SalonActionResult & { id?: string }> {
   const ctx = await getAdminContext();
-  if (!ctx) return { ok: false, error: "unauthorized" };
+  const deny = requireNotStaff(ctx);
+  if (deny) return deny;
   const name = input.name?.trim() ?? "";
   if (name.length < 2) return { ok: false, error: "invalid_name" };
 
@@ -47,6 +70,7 @@ export async function createSupplierAction(input: {
       phone: input.phone?.trim() || null,
       country_origin: (input.countryOrigin?.trim() || "Nigeria").slice(0, 64),
       notes: input.notes?.trim() || null,
+      product_category: input.productCategory?.trim() || null,
       active: true,
     })
     .select("id")
@@ -72,9 +96,15 @@ export async function createInventoryItemAction(input: {
   costCurrency: SalonCurrency;
   sellingPrice?: string | null;
   sellingPriceCurrency?: SalonCurrency;
+  fxNgnPerUsd?: string | null;
+  landedUsd?: string | null;
+  storePriceUsd?: string | null;
+  sellPriceUsd?: string | null;
+  sellPriceLd?: string | null;
 }): Promise<SalonActionResult & { id?: string }> {
   const ctx = await getAdminContext();
-  if (!ctx) return { ok: false, error: "unauthorized" };
+  const deny = requireNotStaff(ctx);
+  if (deny) return deny;
   const productName = input.productName?.trim() ?? "";
   if (productName.length < 2) return { ok: false, error: "invalid_name" };
   if (input.supplierId && !isUuid(input.supplierId)) return { ok: false, error: "invalid_supplier" };
@@ -90,6 +120,16 @@ export async function createInventoryItemAction(input: {
   const pc = normalizeCurrency(input.sellingPriceCurrency ?? cc);
   const openQ = input.openingQty != null && input.openingQty !== "" ? parseQty(input.openingQty) : 0;
   if (openQ == null || openQ < 0) return { ok: false, error: "invalid_opening_qty" };
+
+  const fx = parseFxNgnPerUsd(input.fxNgnPerUsd);
+  const landed = input.landedUsd != null && input.landedUsd !== "" ? parseMoneyToCents(input.landedUsd) : 0;
+  if (landed == null || landed < 0) return { ok: false, error: "invalid_landed" };
+  const storeUsd = input.storePriceUsd != null && input.storePriceUsd !== "" ? parseMoneyToCents(input.storePriceUsd) : null;
+  const sellUsd = input.sellPriceUsd != null && input.sellPriceUsd !== "" ? parseMoneyToCents(input.sellPriceUsd) : null;
+  const sellLd = input.sellPriceLd != null && input.sellPriceLd !== "" ? parseMoneyToCents(input.sellPriceLd) : null;
+
+  const defaultUnit = sellUsd != null ? sellUsd : defPrice;
+  const defaultCur = sellUsd != null ? ("USD" as SalonCurrency) : pc;
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
@@ -108,8 +148,13 @@ export async function createInventoryItemAction(input: {
       quantity_on_hand: openQ ?? 0,
       avg_unit_cost_cents: cost,
       cost_currency: cc,
-      default_unit_price_cents: defPrice,
-      default_price_currency: pc,
+      default_unit_price_cents: defaultUnit ?? defPrice,
+      default_price_currency: defaultUnit != null ? defaultCur : pc,
+      fx_ngn_per_usd: fx,
+      landed_usd_cents_per_unit: landed ?? 0,
+      store_price_usd_cents: storeUsd,
+      sell_price_usd_cents: sellUsd,
+      sell_price_lrd_cents: sellLd,
       active: true,
     })
     .select("id")
@@ -140,10 +185,16 @@ export async function updateInventoryItemAction(input: {
   sellingPrice?: string | null;
   sellingPriceCurrency?: SalonCurrency;
   active: boolean;
+  fxNgnPerUsd?: string | null;
+  landedUsd?: string | null;
+  storePriceUsd?: string | null;
+  sellPriceUsd?: string | null;
+  sellPriceLd?: string | null;
 }): Promise<SalonActionResult> {
   if (!isUuid(input.id)) return { ok: false, error: "invalid_id" };
   const ctx = await getAdminContext();
-  if (!ctx) return { ok: false, error: "unauthorized" };
+  const deny = requireNotStaff(ctx);
+  if (deny) return deny;
   const productName = input.productName?.trim() ?? "";
   if (productName.length < 2) return { ok: false, error: "invalid_name" };
 
@@ -158,6 +209,16 @@ export async function updateInventoryItemAction(input: {
   const cc = normalizeCurrency(input.costCurrency);
   const defPrice = input.sellingPrice ? parseMoneyToCents(input.sellingPrice) : null;
   const pc = normalizeCurrency(input.sellingPriceCurrency ?? cc);
+
+  const fx = parseFxNgnPerUsd(input.fxNgnPerUsd);
+  const landed = input.landedUsd != null && input.landedUsd !== "" ? parseMoneyToCents(input.landedUsd) : 0;
+  if (landed == null || landed < 0) return { ok: false, error: "invalid_landed" };
+  const storeUsd = input.storePriceUsd != null && input.storePriceUsd !== "" ? parseMoneyToCents(input.storePriceUsd) : null;
+  const sellUsd = input.sellPriceUsd != null && input.sellPriceUsd !== "" ? parseMoneyToCents(input.sellPriceUsd) : null;
+  const sellLd = input.sellPriceLd != null && input.sellPriceLd !== "" ? parseMoneyToCents(input.sellPriceLd) : null;
+
+  const defaultUnit = sellUsd != null ? sellUsd : defPrice;
+  const defaultCur = sellUsd != null ? ("USD" as SalonCurrency) : pc;
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
@@ -176,8 +237,13 @@ export async function updateInventoryItemAction(input: {
       quantity_on_hand: qoh,
       avg_unit_cost_cents: cost,
       cost_currency: cc,
-      default_unit_price_cents: defPrice,
-      default_price_currency: pc,
+      default_unit_price_cents: defaultUnit ?? defPrice,
+      default_price_currency: defaultUnit != null ? defaultCur : pc,
+      fx_ngn_per_usd: fx,
+      landed_usd_cents_per_unit: landed ?? 0,
+      store_price_usd_cents: storeUsd,
+      sell_price_usd_cents: sellUsd,
+      sell_price_lrd_cents: sellLd,
       active: input.active,
     })
     .eq("id", input.id);
@@ -194,6 +260,8 @@ export async function createProductSaleAction(input: {
   currency: SalonCurrency;
   paymentMethod?: string | null;
   notes?: string | null;
+  customerName?: string | null;
+  saleDate?: string | null;
 }): Promise<SalonActionResult> {
   if (!isUuid(input.inventoryItemId)) return { ok: false, error: "invalid_item" };
   const ctx = await getAdminContext();
@@ -212,18 +280,29 @@ export async function createProductSaleAction(input: {
 
   const item = await fetchInventoryItem(supabase, input.inventoryItemId);
   if (!item) return { ok: false, error: "not_found" };
-  if (item.cost_currency !== cur) {
-    return { ok: false, error: `sale_currency_must_match_stock_cost_${item.cost_currency}` };
-  }
+
+  const soldAt =
+    input.saleDate && /^\d{4}-\d{2}-\d{2}$/.test(input.saleDate.trim())
+      ? `${input.saleDate.trim()}T12:00:00.000Z`
+      : new Date().toISOString();
+
+  const revUsd = lineRevenueUsdEquivCents(unitPrice, qty, cur);
+  const costUsdUnit = effectiveUnitCostUsdCents(item);
+  const gpUsd = Math.round(revUsd - qty * costUsdUnit);
+  const costSnapshot = item.avg_unit_cost_cents;
 
   const { error } = await supabase.from("sales").insert({
     inventory_item_id: input.inventoryItemId,
     qty,
     unit_price_cents: unitPrice,
-    unit_cost_cents: item.avg_unit_cost_cents,
+    unit_cost_cents: costSnapshot,
     currency: cur,
+    sold_at: soldAt,
     payment_method: input.paymentMethod?.trim() || null,
     notes: input.notes?.trim() || null,
+    customer_name: input.customerName?.trim() || null,
+    revenue_usd_equiv_cents: revUsd,
+    gross_profit_usd_cents: gpUsd,
     created_by: user?.id ?? null,
   });
 
@@ -237,15 +316,56 @@ export async function createProductSaleAction(input: {
   return { ok: true };
 }
 
+export type RetailSaleLineInput = {
+  inventoryItemId: string;
+  qty: string;
+  unitPrice: string;
+  currency: SalonCurrency;
+  customerName?: string | null;
+  notes?: string | null;
+};
+
+export async function createRetailSalesBatchAction(input: {
+  saleDate: string;
+  lines: RetailSaleLineInput[];
+}): Promise<SalonActionResult> {
+  const ctx = await getAdminContext();
+  if (!ctx) return { ok: false, error: "unauthorized" };
+  const d = input.saleDate?.trim();
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, error: "invalid_date" };
+
+  const activeLines = input.lines.filter((ln) => ln.inventoryItemId && ln.qty && ln.unitPrice);
+  if (!activeLines.length) return { ok: false, error: "no_lines" };
+
+  for (const ln of activeLines) {
+    const r = await createProductSaleAction({
+      inventoryItemId: ln.inventoryItemId,
+      qty: ln.qty,
+      unitPrice: ln.unitPrice,
+      currency: ln.currency,
+      customerName: ln.customerName,
+      notes: ln.notes,
+      saleDate: d,
+    });
+    if (!r.ok) return r;
+  }
+  return { ok: true };
+}
+
 export type ProductUsageLine = { inventory_item_id: string; qty: number };
 
 export async function createServiceLogAction(input: {
   serviceName: string;
+  serviceCategory?: string | null;
   revenue: string;
   currency: SalonCurrency;
   staffName?: string | null;
   clientNote?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerFacebook?: string | null;
   productUsage: ProductUsageLine[];
+  serviceDate?: string | null;
 }): Promise<SalonActionResult> {
   const ctx = await getAdminContext();
   if (!ctx) return { ok: false, error: "unauthorized" };
@@ -260,6 +380,13 @@ export async function createServiceLogAction(input: {
     if (!Number.isFinite(u.qty) || u.qty <= 0) return { ok: false, error: "invalid_usage_qty" };
   }
 
+  const soldAt =
+    input.serviceDate && /^\d{4}-\d{2}-\d{2}$/.test(input.serviceDate.trim())
+      ? `${input.serviceDate.trim()}T12:00:00.000Z`
+      : new Date().toISOString();
+
+  const revUsd = lineRevenueUsdEquivCents(rev, 1, cur);
+
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -267,11 +394,17 @@ export async function createServiceLogAction(input: {
 
   const { error } = await supabase.from("service_logs").insert({
     service_name: serviceName,
+    service_category: input.serviceCategory?.trim() || null,
     revenue_cents: rev,
     currency: cur,
+    sold_at: soldAt,
     staff_name: input.staffName?.trim() || null,
     client_note: input.clientNote?.trim() || null,
+    customer_name: input.customerName?.trim() || null,
+    customer_phone: input.customerPhone?.trim() || null,
+    customer_facebook: input.customerFacebook?.trim() || null,
     product_usage: input.productUsage,
+    revenue_usd_equiv_cents: revUsd,
     created_by: user?.id ?? null,
   });
 
@@ -282,6 +415,52 @@ export async function createServiceLogAction(input: {
     return { ok: false, error: error.message };
   }
   revalidateSalon();
+  return { ok: true };
+}
+
+export type ServiceLogLineInput = {
+  serviceCategory: string;
+  revenue: string;
+  currency: SalonCurrency;
+  staffName?: string | null;
+  notes?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerFacebook?: string | null;
+};
+
+export async function createServiceLogsBatchAction(input: {
+  serviceDate: string;
+  lines: ServiceLogLineInput[];
+}): Promise<SalonActionResult> {
+  const ctx = await getAdminContext();
+  if (!ctx) return { ok: false, error: "unauthorized" };
+  const d = input.serviceDate?.trim();
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, error: "invalid_date" };
+
+  const active = input.lines.filter((ln) => ln.serviceCategory && ln.revenue);
+  if (!active.length) return { ok: false, error: "no_lines" };
+
+  for (const ln of active) {
+    const name =
+      ln.serviceCategory === "Others" && ln.notes?.trim()
+        ? `Others — ${ln.notes.trim()}`
+        : ln.serviceCategory;
+    const r = await createServiceLogAction({
+      serviceName: name,
+      serviceCategory: ln.serviceCategory,
+      revenue: ln.revenue,
+      currency: ln.currency,
+      staffName: ln.staffName,
+      clientNote: ln.notes,
+      customerName: ln.customerName,
+      customerPhone: ln.customerPhone,
+      customerFacebook: ln.customerFacebook,
+      productUsage: [],
+      serviceDate: d,
+    });
+    if (!r.ok) return r;
+  }
   return { ok: true };
 }
 
@@ -297,12 +476,15 @@ export async function createPurchaseAction(input: {
   currency: SalonCurrency;
   notes?: string | null;
   shippingReference?: string | null;
+  fxNgnPerUsd?: string | null;
+  shippingLandedUsd?: string | null;
   lines: PurchaseLineInput[];
   markReceived: boolean;
 }): Promise<SalonActionResult & { purchaseId?: string }> {
   if (!isUuid(input.supplierId)) return { ok: false, error: "invalid_supplier" };
   const ctx = await getAdminContext();
-  if (!ctx) return { ok: false, error: "unauthorized" };
+  const deny = requireNotStaff(ctx);
+  if (deny) return deny;
   const d = input.purchaseDate?.trim();
   if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, error: "invalid_date" };
   if (!input.lines.length) return { ok: false, error: "no_lines" };
@@ -323,6 +505,13 @@ export async function createPurchaseAction(input: {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const fx = parseFxNgnPerUsd(input.fxNgnPerUsd);
+  const shipUsd =
+    input.shippingLandedUsd != null && input.shippingLandedUsd !== ""
+      ? parseMoneyToCents(input.shippingLandedUsd)
+      : 0;
+  if (shipUsd == null || shipUsd < 0) return { ok: false, error: "invalid_shipping" };
+
   const { data: pRow, error: pErr } = await supabase
     .from("purchases")
     .insert({
@@ -332,6 +521,8 @@ export async function createPurchaseAction(input: {
       status: "draft",
       notes: input.notes?.trim() || null,
       shipping_reference: input.shippingReference?.trim() || null,
+      fx_ngn_per_usd: fx,
+      shipping_landed_usd_cents: shipUsd ?? 0,
       created_by: user?.id ?? null,
     })
     .select("id")
@@ -365,7 +556,8 @@ export async function createPurchaseAction(input: {
 export async function receivePurchaseAction(input: { purchaseId: string }): Promise<SalonActionResult> {
   if (!isUuid(input.purchaseId)) return { ok: false, error: "invalid_id" };
   const ctx = await getAdminContext();
-  if (!ctx) return { ok: false, error: "unauthorized" };
+  const deny = requireNotStaff(ctx);
+  if (deny) return deny;
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.from("purchases").update({ status: "received" }).eq("id", input.purchaseId);

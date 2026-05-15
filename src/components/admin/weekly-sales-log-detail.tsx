@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  addWeeklyProductSaleAction,
-  addWeeklyServiceSaleAction,
-  addWeeklySpacePaymentAction,
-  updateWeeklyReportHeaderAction,
-} from "@/app/actions/admin-weekly-sales-log";
+import { updateWeeklyReportHeaderAction } from "@/app/actions/admin-weekly-sales-log";
 import type {
   InventoryProductRow,
   MoneyBag,
@@ -50,6 +45,7 @@ function MoneyBagSummary({ title, bag }: { title: string; bag: MoneyBag }) {
   );
 }
 
+/** Legacy archived worksheet — line entry disabled to avoid duplicate stock/revenue paths. */
 export function WeeklySalesLogDetail({
   report,
   products,
@@ -57,6 +53,7 @@ export function WeeklySalesLogDetail({
   spaces,
   inventory,
   summary,
+  entriesLocked = true,
 }: {
   report: WeeklySalesReportRow;
   products: WeeklyProductSaleRow[];
@@ -69,6 +66,7 @@ export function WeeklySalesLogDetail({
     spacePayments: MoneyBag;
     grandTotal: MoneyBag;
   };
+  entriesLocked?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -79,35 +77,6 @@ export function WeeklySalesLogDetail({
   const [hdrStart, setHdrStart] = useState(report.start_date);
   const [hdrEnd, setHdrEnd] = useState(report.end_date);
   const [hdrStaff, setHdrStaff] = useState(report.staff_on_duty ?? "");
-
-  const [pDay, setPDay] = useState(report.start_date);
-  const [pItem, setPItem] = useState(inventory[0]?.id ?? "");
-  const [pQty, setPQty] = useState("1");
-  const [pPrice, setPPrice] = useState("");
-  const [pPay, setPPay] = useState("");
-  const [pStaff, setPStaff] = useState("");
-
-  const linePreview = useMemo(() => {
-    const q = Number(pQty);
-    const up = Number(String(pPrice).replace(/,/g, ""));
-    if (!Number.isFinite(q) || !Number.isFinite(up) || q <= 0 || up < 0) return null;
-    return Math.round(q * up * 100);
-  }, [pQty, pPrice]);
-
-  const [sDay, setSDay] = useState(report.start_date);
-  const [sName, setSName] = useState("");
-  const [sStylist, setSStylist] = useState("");
-  const [sClient, setSClient] = useState("");
-  const [sAmt, setSAmt] = useState("");
-  const [sPay, setSPay] = useState("");
-  const [sNotes, setSNotes] = useState("");
-
-  const [spStylist, setSpStylist] = useState("");
-  const [spSpace, setSpSpace] = useState("");
-  const [spWeek, setSpWeek] = useState("");
-  const [spPaid, setSpPaid] = useState("");
-  const [spBal, setSpBal] = useState("");
-  const [spPay, setSpPay] = useState("");
 
   return (
     <div className="space-y-10 pb-12">
@@ -121,14 +90,21 @@ export function WeeklySalesLogDetail({
       </div>
 
       <header className="space-y-2">
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">Weekly sales log</h1>
+        <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">Archived weekly worksheet</h1>
         <p className="text-sm text-white/50">
           {report.start_date} → {report.end_date}
         </p>
       </header>
 
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.08] px-4 py-3 text-sm text-amber-100/90">
+        <p className="font-medium">Historical record only</p>
+        <p className="mt-1 text-xs text-amber-100/70">
+          Daily operations use <strong className="font-semibold">Sale</strong> and <strong className="font-semibold">Service</strong>. Adding lines here no longer affects stock and is disabled to prevent double-counting.
+        </p>
+      </div>
+
       <section className="admin-card space-y-4 p-6">
-        <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Weekly header</h2>
+        <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Worksheet header</h2>
         {err ? <p className="text-sm text-red-300">{err}</p> : null}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <label className="block text-xs text-white/55">
@@ -171,80 +147,10 @@ export function WeeklySalesLogDetail({
 
       <div className="grid gap-8 lg:grid-cols-2">
         <section className="admin-card space-y-4 p-6">
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Product sales</h2>
-          <p className="text-xs text-white/40">Saving a line records the sale and reduces inventory. Default currency NGN.</p>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block text-xs text-white/55">
-              Day
-              <input type="date" value={pDay} min={report.start_date} max={report.end_date} onChange={(e) => setPDay(e.target.value)} className={field} />
-            </label>
-            <label className="block text-xs text-white/55 sm:col-span-2">
-              Product
-              <select value={pItem} onChange={(e) => setPItem(e.target.value)} className={field}>
-                {inventory.length === 0 ? <option value="">No products</option> : null}
-                {inventory.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.product_code} · {i.product_name} (qty {i.quantity_on_hand})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-xs text-white/55">
-              Qty sold
-              <input value={pQty} onChange={(e) => setPQty(e.target.value)} className={field} inputMode="decimal" />
-            </label>
-            <label className="block text-xs text-white/55">
-              Unit price (NGN)
-              <input value={pPrice} onChange={(e) => setPPrice(e.target.value)} className={field} inputMode="decimal" />
-            </label>
-            <p className="sm:col-span-2 text-xs text-white/50">
-              Line total:{" "}
-              {linePreview != null ? (
-                <span className="font-semibold text-[var(--admin-accent)]">{formatSalonMoney(linePreview, "NGN")}</span>
-              ) : (
-                "—"
-              )}
-            </p>
-            <label className="block text-xs text-white/55">
-              Payment method
-              <input value={pPay} onChange={(e) => setPPay(e.target.value)} className={field} placeholder="Cash, transfer…" />
-            </label>
-            <label className="block text-xs text-white/55">
-              Staff name
-              <input value={pStaff} onChange={(e) => setPStaff(e.target.value)} className={field} />
-            </label>
-          </div>
-          <button
-            type="button"
-            disabled={pending || !pItem}
-            onClick={() => {
-              setErr(null);
-              start(async () => {
-                const r = await addWeeklyProductSaleAction({
-                  reportId: report.id,
-                  dayDate: pDay,
-                  inventoryItemId: pItem,
-                  qtySold: pQty,
-                  unitPriceMajor: pPrice,
-                  paymentMethod: pPay || null,
-                  staffName: pStaff || null,
-                  currency: "NGN",
-                });
-                if (!r.ok) {
-                  setErr(r.error.replace(/_/g, " "));
-                  return;
-                }
-                setPQty("1");
-                setPPrice("");
-                setPPay("");
-                setPStaff("");
-                router.refresh();
-              });
-            }}
-            className="rounded-full bg-[var(--admin-accent)] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black disabled:opacity-50"
-          >
-            Add product line
-          </button>
+          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Product sales (historical)</h2>
+          {entriesLocked ? (
+            <p className="text-xs text-white/40">Read-only snapshot. Use the Sale module for new retail entries.</p>
+          ) : null}
 
           <div className="overflow-x-auto border-t border-white/10 pt-4">
             <table className="w-full min-w-[520px] text-left text-sm">
@@ -279,72 +185,8 @@ export function WeeklySalesLogDetail({
         </section>
 
         <section className="admin-card space-y-4 p-6">
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Services</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block text-xs text-white/55">
-              Day
-              <input type="date" value={sDay} min={report.start_date} max={report.end_date} onChange={(e) => setSDay(e.target.value)} className={field} />
-            </label>
-            <label className="block text-xs text-white/55 sm:col-span-2">
-              Service
-              <input value={sName} onChange={(e) => setSName(e.target.value)} className={field} placeholder="e.g. Braids" />
-            </label>
-            <label className="block text-xs text-white/55">
-              Stylist name
-              <input value={sStylist} onChange={(e) => setSStylist(e.target.value)} className={field} />
-            </label>
-            <label className="block text-xs text-white/55">
-              Client name
-              <input value={sClient} onChange={(e) => setSClient(e.target.value)} className={field} />
-            </label>
-            <label className="block text-xs text-white/55">
-              Amount (NGN)
-              <input value={sAmt} onChange={(e) => setSAmt(e.target.value)} className={field} inputMode="decimal" />
-            </label>
-            <label className="block text-xs text-white/55">
-              Payment method
-              <input value={sPay} onChange={(e) => setSPay(e.target.value)} className={field} />
-            </label>
-            <label className="block text-xs text-white/55 sm:col-span-2">
-              Notes
-              <input value={sNotes} onChange={(e) => setSNotes(e.target.value)} className={field} />
-            </label>
-          </div>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => {
-              setErr(null);
-              start(async () => {
-                const r = await addWeeklyServiceSaleAction({
-                  reportId: report.id,
-                  dayDate: sDay,
-                  serviceName: sName,
-                  stylistName: sStylist || null,
-                  clientName: sClient || null,
-                  amountMajor: sAmt,
-                  paymentMethod: sPay || null,
-                  notes: sNotes || null,
-                  currency: "NGN",
-                });
-                if (!r.ok) {
-                  setErr(r.error.replace(/_/g, " "));
-                  return;
-                }
-                setSName("");
-                setSStylist("");
-                setSClient("");
-                setSAmt("");
-                setSPay("");
-                setSNotes("");
-                router.refresh();
-              });
-            }}
-            className="rounded-full bg-[var(--admin-accent)] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black disabled:opacity-50"
-          >
-            Add service line
-          </button>
-
+          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Services (historical)</h2>
+          {entriesLocked ? <p className="text-xs text-white/40">Read-only. Use the Service module for new entries.</p> : null}
           <div className="overflow-x-auto border-t border-white/10 pt-4">
             <table className="w-full min-w-[480px] text-left text-sm">
               <thead>
@@ -374,66 +216,8 @@ export function WeeklySalesLogDetail({
       </div>
 
       <section className="admin-card space-y-4 p-6">
-        <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Stylist space payments</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <label className="block text-xs text-white/55">
-            Stylist name
-            <input value={spStylist} onChange={(e) => setSpStylist(e.target.value)} className={field} />
-          </label>
-          <label className="block text-xs text-white/55">
-            Space number
-            <input value={spSpace} onChange={(e) => setSpSpace(e.target.value)} className={field} />
-          </label>
-          <label className="block text-xs text-white/55">
-            Week period
-            <input value={spWeek} onChange={(e) => setSpWeek(e.target.value)} className={field} placeholder="e.g. Apr 14–20" />
-          </label>
-          <label className="block text-xs text-white/55">
-            Amount paid (NGN)
-            <input value={spPaid} onChange={(e) => setSpPaid(e.target.value)} className={field} inputMode="decimal" />
-          </label>
-          <label className="block text-xs text-white/55">
-            Balance due (NGN)
-            <input value={spBal} onChange={(e) => setSpBal(e.target.value)} className={field} inputMode="decimal" />
-          </label>
-          <label className="block text-xs text-white/55">
-            Payment method
-            <input value={spPay} onChange={(e) => setSpPay(e.target.value)} className={field} />
-          </label>
-        </div>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => {
-            setErr(null);
-            start(async () => {
-              const r = await addWeeklySpacePaymentAction({
-                reportId: report.id,
-                stylistName: spStylist,
-                spaceNumber: spSpace || null,
-                weekPeriod: spWeek || null,
-                amountPaidMajor: spPaid || "0",
-                balanceDueMajor: spBal || "0",
-                paymentMethod: spPay || null,
-                currency: "NGN",
-              });
-              if (!r.ok) {
-                setErr(r.error.replace(/_/g, " "));
-                return;
-              }
-              setSpStylist("");
-              setSpSpace("");
-              setSpWeek("");
-              setSpPaid("");
-              setSpBal("");
-              setSpPay("");
-              router.refresh();
-            });
-          }}
-          className="rounded-full bg-[var(--admin-accent)] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black disabled:opacity-50"
-        >
-          Add space payment
-        </button>
+        <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Stylist space payments (historical)</h2>
+        <p className="text-xs text-white/40">Archived booth payment records — read only.</p>
 
         <div className="overflow-x-auto border-t border-white/10 pt-4">
           <table className="w-full min-w-[560px] text-left text-sm">

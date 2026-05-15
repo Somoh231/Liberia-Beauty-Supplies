@@ -2,12 +2,17 @@ import type { Metadata } from "next";
 import { SalonInventoryNewForm } from "@/components/admin/salon-inventory-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchSuppliers } from "@/lib/admin/salon-queries";
+import { isSalonStaffRole, requireAdminContext } from "@/lib/auth/admin-context";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 export const metadata: Metadata = { title: "New product" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminInventoryNewPage() {
+  const ctx = await requireAdminContext();
+  if (isSalonStaffRole(ctx.roleSlug)) redirect("/admin/inventory");
+
   const supabase = await createSupabaseServerClient();
   const suppliers = await fetchSuppliers(supabase);
 

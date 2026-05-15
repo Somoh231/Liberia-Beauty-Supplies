@@ -21,10 +21,10 @@ export default function AdminRootLayout({ children }: { children: ReactNode }) {
         aria-hidden
         style={{
           background: `
-            radial-gradient(ellipse 80% 50% at 20% -10%, rgba(212, 184, 150, 0.09), transparent 55%),
-            radial-gradient(ellipse 60% 45% at 100% 20%, rgba(120, 90, 140, 0.05), transparent 50%),
-            radial-gradient(ellipse 70% 60% at 50% 100%, rgba(212, 184, 150, 0.04), transparent 45%),
-            linear-gradient(180deg, #080809 0%, #050506 50%, #070708 100%)
+            radial-gradient(ellipse 80% 50% at 20% -10%, rgba(201, 138, 155, 0.12), transparent 55%),
+            radial-gradient(ellipse 60% 45% at 100% 20%, rgba(232, 196, 120, 0.08), transparent 50%),
+            radial-gradient(ellipse 70% 60% at 50% 100%, rgba(212, 175, 55, 0.06), transparent 45%),
+            linear-gradient(180deg, #0a0708 0%, #050405 50%, #070608 100%)
           `,
         }}
       />

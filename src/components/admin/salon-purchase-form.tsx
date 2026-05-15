@@ -45,6 +45,8 @@ export function SalonPurchaseForm({
             currency: normalizeCurrency(String(fd.get("currency") ?? "NGN")),
             notes: String(fd.get("notes") ?? "") || null,
             shippingReference: String(fd.get("ship_ref") ?? "") || null,
+            fxNgnPerUsd: String(fd.get("fx_ngn_usd") ?? "") || null,
+            shippingLandedUsd: String(fd.get("shipping_usd") ?? "") || null,
             lines: cleanLines,
             markReceived: fd.get("mark_received") === "on",
           });
@@ -82,6 +84,16 @@ export function SalonPurchaseForm({
           <option value="LRD">LRD</option>
         </select>
       </label>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block text-xs text-white/55">
+          FX (NGN per 1 USD)
+          <input name="fx_ngn_usd" type="number" step="0.01" min="0" className={field} placeholder="e.g. 1550" />
+        </label>
+        <label className="block text-xs text-white/55">
+          Landed / shipping (USD total)
+          <input name="shipping_usd" type="number" step="0.01" min="0" className={field} placeholder="0.00" />
+        </label>
+      </div>
       <label className="block text-xs text-white/55">
         Shipping reference
         <input name="ship_ref" className={field} placeholder="Container / AWB" />

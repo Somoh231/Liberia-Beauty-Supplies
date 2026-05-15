@@ -17,12 +17,16 @@ export default function AboutPage() {
               {SITE_NAME}
             </h1>
             <p className="mt-5 max-w-xl text-sm leading-relaxed text-[var(--fg-muted)] sm:text-base">
-              We built a Monrovia studio that feels international: marble-inspired floors, blush stations, gold trim, and
-              lighting designed for precision — so every appointment feels calm, elevated, and unmistakably yours.
+              Liberia Beauty Salon and Supplies is Liberia&apos;s first space-for-lease salon — a modern, purpose-built environment designed to give talented young
+              Liberian beauty technicians and hair stylists the platform they deserve.
             </p>
-            <p className="mt-5 max-w-xl text-sm leading-relaxed text-[var(--fg-muted)]">
-              Our team focuses on clean technique, honest timing, and finishes that hold up in real life — with a curated
-              supplies boutique so you can maintain results between visits.
+            <p className="mt-5 max-w-xl text-sm leading-relaxed text-[var(--fg-muted)] sm:text-base">
+              Our mission is simple: to take skilled professionals off the streets and out of undesirable working conditions, and bring them into a clean, safe, and
+              fully professional workspace where their talent can truly flourish.
+            </p>
+            <p className="mt-5 max-w-xl text-sm leading-relaxed text-[var(--fg-muted)] sm:text-base">
+              Each stylist operates fully independently — managing their own clients, setting their own schedule, and building their own business — all within a
+              modern, well-equipped salon that reflects the excellence of their craft.
             </p>
             <Link
               href="/book"

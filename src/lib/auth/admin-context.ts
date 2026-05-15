@@ -1,12 +1,13 @@
 import "server-only";
 
+import type { AdminPortalRole } from "@/lib/auth/admin-roles";
 import { STAFF_LOGIN_PATH } from "@/lib/auth/safe-admin-next";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 
-/** Roles allowed into `/admin` (DB slug; includes legacy `admin` mapped to owner-tier in UI). */
-export type AdminPortalRole = "owner" | "manager" | "staff" | "admin";
+export type { AdminPortalRole } from "@/lib/auth/admin-roles";
+export { isSalonStaffRole } from "@/lib/auth/admin-roles";
 
 export type AdminContext = {
   user: User;
@@ -101,3 +102,4 @@ export async function requireAdminContext(): Promise<AdminContext> {
   }
   return ctx;
 }
+

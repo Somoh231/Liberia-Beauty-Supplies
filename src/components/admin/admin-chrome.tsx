@@ -1,20 +1,25 @@
 "use client";
 
 import { signOutAdmin } from "@/app/actions/admin-auth";
-import type { AdminPortalRole } from "@/lib/auth/admin-context";
+import type { AdminPortalRole } from "@/lib/auth/admin-roles";
+import { isSalonStaffRole } from "@/lib/auth/admin-roles";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const nav = [
+const allNav = [
   { href: "/admin", label: "Dashboard" },
-  { href: "/admin/inventory", label: "Inventory" },
-  { href: "/admin/sales-log", label: "Sales log" },
   { href: "/admin/sales/new", label: "Sale" },
   { href: "/admin/services/new", label: "Service" },
-  { href: "/admin/purchases", label: "Purchases" },
+  { href: "/admin/sales-log", label: "Sale Log" },
+  { href: "/admin/inventory", label: "Inventory" },
   { href: "/admin/suppliers", label: "Suppliers" },
 ] as const;
+
+function navForRole(role: AdminPortalRole) {
+  if (isSalonStaffRole(role)) return allNav.filter((i) => i.href !== "/admin/suppliers");
+  return [...allNav];
+}
 
 function navActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -22,6 +27,7 @@ function navActive(pathname: string, href: string) {
 
 export function AdminChrome({ email, roleSlug }: { email: string; roleSlug: AdminPortalRole }) {
   const pathname = usePathname() || "";
+  const nav = navForRole(roleSlug);
 
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--admin-line)] bg-[#060607]/72 text-[var(--admin-fg)] backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-[#060607]/55 print:hidden">

@@ -27,6 +27,7 @@ export function SalonSupplierCreateForm() {
             phone: String(fd.get("phone") ?? "") || null,
             countryOrigin: String(fd.get("country") ?? "") || "Nigeria",
             notes: String(fd.get("notes") ?? "") || null,
+            productCategory: String(fd.get("product_category") ?? "") || null,
           });
           if (!r.ok) {
             setErr(r.error);
@@ -46,6 +47,7 @@ export function SalonSupplierCreateForm() {
         <input name="email" type="email" placeholder="Email" className={field} />
       </div>
       <input name="country" placeholder="Country (default Nigeria)" className={field} defaultValue="Nigeria" />
+      <input name="product_category" placeholder="Product category (e.g. Hair extensions)" className={field} />
       <input name="notes" placeholder="Notes" className={field} />
       <button
         type="submit"

@@ -1,220 +1,261 @@
 import type { Metadata } from "next";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchDashboardRollup, type MoneyBag } from "@/lib/admin/salon-queries";
-import { formatSalonMoney, getMonroviaDayKey, type SalonCurrency } from "@/lib/admin/salon-format";
+import {
+  fetchDashboardRollup,
+  fetchRecentActivity,
+  fetchTopMarginProducts,
+  fetchLowStockAlerts,
+  fetchTodayRevenueSnapshot,
+  fetchSaleLogAnalytics,
+} from "@/lib/admin/salon-queries";
+import { formatSalonMoney } from "@/lib/admin/salon-format";
+import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
 
-function emptyBag(): MoneyBag {
-  return { USD: 0, LRD: 0, NGN: 0 };
-}
-
-function moneyLines(bag: MoneyBag, primary: SalonCurrency = "NGN") {
-  const order = [...new Set<SalonCurrency>([primary, "USD", "LRD"])];
-  const lines = order.map((c) => ({ c, v: bag[c] })).filter(({ v }) => v > 0);
-  if (!lines.length) {
-    return <p className="text-lg text-white/40">—</p>;
-  }
-  return (
-    <div className="space-y-1">
-      {lines.map(({ c, v }) => (
-        <p key={c} className={c === primary ? "text-lg text-white" : "text-sm text-white/55"}>
-          {formatSalonMoney(v, c)}
-        </p>
-      ))}
-    </div>
-  );
-}
-
-function sumLastDays(
-  productMap: Record<string, MoneyBag>,
-  serviceMap: Record<string, MoneyBag>,
-  profitMap: Record<string, MoneyBag>,
-  days: number,
-) {
-  const out = {
-    product: emptyBag(),
-    service: emptyBag(),
-    profit: emptyBag(),
-  };
-  const today = new Date();
-  for (let i = 0; i < days; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const key = getMonroviaDayKey(d);
-    const p = productMap[key] ?? emptyBag();
-    const s = serviceMap[key] ?? emptyBag();
-    const g = profitMap[key] ?? emptyBag();
-    (["USD", "LRD", "NGN"] as const).forEach((c) => {
-      out.product[c] += p[c];
-      out.service[c] += s[c];
-      out.profit[c] += g[c];
-    });
-  }
-  return out;
-}
-
 export default async function AdminDashboardPage() {
+  const ctx = await requireAdminContext();
+  const staff = isSalonStaffRole(ctx.roleSlug);
+
   let err: string | null = null;
   let rollup: Awaited<ReturnType<typeof fetchDashboardRollup>> | null = null;
+  let activity: Awaited<ReturnType<typeof fetchRecentActivity>> = [];
+  let margins: Awaited<ReturnType<typeof fetchTopMarginProducts>> = [];
+  let lowStock: Awaited<ReturnType<typeof fetchLowStockAlerts>> = [];
+  let today: Awaited<ReturnType<typeof fetchTodayRevenueSnapshot>> | null = null;
+  let topProducts: Awaited<ReturnType<typeof fetchSaleLogAnalytics>>["topProducts"] = [];
+  let topServices: Awaited<ReturnType<typeof fetchSaleLogAnalytics>>["topServices"] = [];
 
   try {
     const supabase = await createSupabaseServerClient();
-    rollup = await fetchDashboardRollup(supabase);
+    const [r, act, m, ls, t, analytics] = await Promise.all([
+      fetchDashboardRollup(supabase),
+      fetchRecentActivity(supabase, 10),
+      fetchTopMarginProducts(supabase, 5),
+      fetchLowStockAlerts(supabase, 8),
+      fetchTodayRevenueSnapshot(supabase),
+      fetchSaleLogAnalytics(supabase),
+    ]);
+    rollup = r;
+    activity = act;
+    margins = m;
+    lowStock = ls;
+    today = t;
+    topProducts = analytics.topProducts.slice(0, 5);
+    topServices = analytics.topServices.slice(0, 5);
   } catch (e) {
     err = e instanceof Error ? e.message : "Could not load dashboard.";
   }
 
-  const todayKey = getMonroviaDayKey();
-  const todayProduct = rollup ? (rollup.productRevenueByDay[todayKey] ?? emptyBag()) : emptyBag();
-  const todayService = rollup ? (rollup.serviceRevenueByDay[todayKey] ?? emptyBag()) : emptyBag();
-  const todayProfit = rollup ? (rollup.productGrossProfitByDay[todayKey] ?? emptyBag()) : emptyBag();
-
-  const w7 = rollup ? sumLastDays(rollup.productRevenueByDay, rollup.serviceRevenueByDay, rollup.productGrossProfitByDay, 7) : null;
-  const m30 = rollup?.totalsLast30 ?? null;
-
-  const est = emptyBag();
-  if (m30) {
-    (["USD", "LRD", "NGN"] as const).forEach((c) => {
-      est[c] = m30.productGrossProfit[c] + m30.serviceRevenue[c];
-    });
-  }
-
-  const inv = rollup?.inventoryValueByCurrency ?? emptyBag();
+  const monthCombined =
+    (rollup?.totalsLast30.productRevenueUsd ?? 0) + (rollup?.totalsLast30.serviceRevenueUsd ?? 0);
+  const y0 = new Date().getFullYear();
+  const ytdCombined = rollup
+    ? Object.keys(rollup.productRevenueUsdByDay)
+        .filter((d) => d.startsWith(`${y0}-`))
+        .reduce((a, d) => a + (rollup!.productRevenueUsdByDay[d] ?? 0), 0) +
+      Object.keys(rollup.serviceRevenueUsdByDay)
+        .filter((d) => d.startsWith(`${y0}-`))
+        .reduce((a, d) => a + (rollup!.serviceRevenueUsdByDay[d] ?? 0), 0)
+    : 0;
+  const grossProfit30d = rollup?.totalsLast30.productGrossProfitUsd ?? 0;
 
   return (
     <div className="mx-auto max-w-6xl space-y-8 pb-10">
       <header className="space-y-2">
         <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium tracking-tight text-white sm:text-4xl">
-          Salon overview
+          Command center
         </h1>
-        <p className="max-w-2xl text-sm text-white/50">
-          Sales, services, and stock move together. Daily totals use Monrovia dates; NGN is shown first when present.
-        </p>
+        <p className="max-w-2xl text-sm text-white/50">Stock, sales, and services at a glance — optimized for daily operations.</p>
       </header>
 
       {err ? (
         <section className="admin-card border border-red-500/25 bg-red-500/[0.08] p-6">
           <p className="text-sm text-red-100/90">{err}</p>
-          <p className="mt-2 text-xs text-red-100/60">
-            Run the latest Supabase migrations for salon inventory and weekly sales (see <code className="rounded bg-black/30 px-1">web/supabase/migrations</code>
-            ).
-          </p>
         </section>
-      ) : rollup ? (
+      ) : rollup && today ? (
         <>
+          {(rollup.lowStockCount > 0 || rollup.outOfStockCount > 0) && lowStock.length > 0 ? (
+            <section className="admin-card border-amber-500/25 bg-amber-500/[0.06] p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-100/80">Stock alerts</h2>
+                <Link href="/admin/inventory?status=low_stock" className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]">
+                  View all →
+                </Link>
+              </div>
+              <ul className="mt-3 space-y-2">
+                {lowStock.map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-2 text-sm">
+                    <Link href={`/admin/inventory/${item.id}`} className="text-white hover:text-[var(--admin-accent)]">
+                      {item.product_name}
+                    </Link>
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
+                        item.stock_status === "out_of_stock"
+                          ? "bg-red-500/20 text-red-100"
+                          : "bg-amber-500/20 text-amber-100",
+                      )}
+                    >
+                      {item.quantity_on_hand} {item.unit}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="admin-card p-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Today · products</p>
-              <div className="mt-2">{moneyLines(todayProduct)}</div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Inventory value</p>
+              <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">
+                {formatSalonMoney(rollup.inventoryValueUsdCents, "USD")}
+              </p>
             </div>
             <div className="admin-card p-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Today · services</p>
-              <div className="mt-2">{moneyLines(todayService)}</div>
-            </div>
-            <div className="admin-card p-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Today · product profit</p>
-              <div className="mt-2">{moneyLines(todayProfit)}</div>
-            </div>
-            <div className="admin-card p-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Low stock SKUs</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Low stock</p>
               <p className="mt-2 font-[family-name:var(--font-display)] text-3xl text-white">{rollup.lowStockCount}</p>
-              <Link href="/admin/inventory" className="mt-2 inline-block text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]">
-                View inventory →
-              </Link>
+            </div>
+            <div className="admin-card p-5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Out of stock</p>
+              <p className="mt-2 font-[family-name:var(--font-display)] text-3xl text-white">{rollup.outOfStockCount}</p>
+            </div>
+            <div className="admin-card p-5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Gross profit (30d)</p>
+              <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-[var(--admin-accent)]">
+                {formatSalonMoney(grossProfit30d, "USD")}
+              </p>
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <section className="admin-card p-6">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Last 7 days (Monrovia)</p>
-              <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                <div>
-                  <p className="text-white/45">Product sales</p>
-                  <div className="mt-1">{moneyLines(w7!.product)}</div>
-                </div>
-                <div>
-                  <p className="text-white/45">Service revenue</p>
-                  <div className="mt-1">{moneyLines(w7!.service)}</div>
-                </div>
-                <div className="sm:col-span-2">
-                  <p className="text-white/45">Product gross profit (7d)</p>
-                  <div className="mt-1">{moneyLines(w7!.profit)}</div>
-                </div>
-              </div>
-            </section>
-
-            <section className="admin-card p-6">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Last 30 days</p>
-              <div className="mt-4 space-y-3 text-sm">
-                <div className="flex justify-between gap-4 border-b border-white/8 pb-2">
-                  <span className="text-white/45">Product revenue</span>
-                  <div className="text-right">{moneyLines(m30!.productRevenue)}</div>
-                </div>
-                <div className="flex justify-between gap-4 border-b border-white/8 pb-2">
-                  <span className="text-white/45">Service revenue</span>
-                  <div className="text-right">{moneyLines(m30!.serviceRevenue)}</div>
-                </div>
-                <div className="flex justify-between gap-4 border-b border-white/8 pb-2">
-                  <span className="text-white/45">Product gross profit</span>
-                  <div className="text-right">{moneyLines(m30!.productGrossProfit)}</div>
-                </div>
-                <div className="flex justify-between gap-4 pt-1">
-                  <span className="text-white/55">Est. total contribution (30d)</span>
-                  <div className="text-right font-medium text-[var(--admin-accent)]">{moneyLines(est)}</div>
-                </div>
-                <p className="text-[11px] leading-relaxed text-white/35">
-                  Contribution = product gross profit + service revenue (service COGS not auto-deducted unless you add product usage on each service log).
-                </p>
-              </div>
-            </section>
-          </div>
-
-          <section className="admin-card p-6">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Inventory value (on hand × avg cost)</p>
-            <div className="mt-3 grid gap-6 text-sm sm:grid-cols-3">
+          <section className="admin-card p-5">
+            <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Today&apos;s revenue</h2>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div>
-                <p className="text-white/45">NGN</p>
-                <p className="text-xl text-white">{formatSalonMoney(inv.NGN, "NGN")}</p>
+                <p className="text-xs text-white/45">Retail (USD equiv.)</p>
+                <p className="mt-1 text-xl text-white">{formatSalonMoney(today.retailUsdCents, "USD")}</p>
+                {today.retailNative.USD > 0 || today.retailNative.LRD > 0 ? (
+                  <p className="mt-1 text-[11px] text-white/40">
+                    {today.retailNative.USD > 0 ? formatSalonMoney(today.retailNative.USD, "USD") : null}
+                    {today.retailNative.USD > 0 && today.retailNative.LRD > 0 ? " · " : null}
+                    {today.retailNative.LRD > 0 ? formatSalonMoney(today.retailNative.LRD, "LRD") : null}
+                  </p>
+                ) : null}
               </div>
               <div>
-                <p className="text-white/45">USD</p>
-                <p className="text-xl text-white">{formatSalonMoney(inv.USD, "USD")}</p>
+                <p className="text-xs text-white/45">Services (USD equiv.)</p>
+                <p className="mt-1 text-xl text-white">{formatSalonMoney(today.serviceUsdCents, "USD")}</p>
+                {today.serviceNative.USD > 0 || today.serviceNative.LRD > 0 ? (
+                  <p className="mt-1 text-[11px] text-white/40">
+                    {today.serviceNative.USD > 0 ? formatSalonMoney(today.serviceNative.USD, "USD") : null}
+                    {today.serviceNative.USD > 0 && today.serviceNative.LRD > 0 ? " · " : null}
+                    {today.serviceNative.LRD > 0 ? formatSalonMoney(today.serviceNative.LRD, "LRD") : null}
+                  </p>
+                ) : null}
               </div>
               <div>
-                <p className="text-white/45">LRD</p>
-                <p className="text-xl text-white">{formatSalonMoney(inv.LRD, "LRD")}</p>
+                <p className="text-xs text-white/45">Month (USD equiv.)</p>
+                <p className="mt-1 text-xl text-white">{formatSalonMoney(monthCombined, "USD")}</p>
+              </div>
+              <div>
+                <p className="text-xs text-white/45">YTD (USD equiv.)</p>
+                <p className="mt-1 text-xl text-white">{formatSalonMoney(ytdCombined, "USD")}</p>
               </div>
             </div>
           </section>
 
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href="/admin/sales-log"
-              className="rounded-full bg-[var(--admin-accent)] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black"
-            >
-              Weekly sales log
-            </Link>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <section className="admin-card p-6">
+              <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Best-selling products (YTD)</h2>
+              <ul className="mt-4 space-y-2 text-sm">
+                {topProducts.length === 0 ? <li className="text-white/40">No retail sales yet.</li> : null}
+                {topProducts.map((p) => (
+                  <li key={p.name} className="flex justify-between gap-2 border-b border-white/[0.06] py-2 text-white/75">
+                    <span>{p.name}</span>
+                    <span className="text-white/55">
+                      {p.qty} sold · {formatSalonMoney(p.revenueUsdCents, "USD")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section className="admin-card p-6">
+              <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Top services (YTD)</h2>
+              <ul className="mt-4 space-y-2 text-sm">
+                {topServices.length === 0 ? <li className="text-white/40">No service entries yet.</li> : null}
+                {topServices.map((s) => (
+                  <li key={s.name} className="flex justify-between gap-2 border-b border-white/[0.06] py-2 text-white/75">
+                    <span>{s.name}</span>
+                    <span className="text-white/55">
+                      {s.count} · {formatSalonMoney(s.revenueUsdCents, "USD")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </div>
+
+          <section className="admin-card p-6">
+            <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Top gross margin (inventory)</h2>
+            <ul className="mt-4 space-y-2 text-sm">
+              {margins.length === 0 ? <li className="text-white/40">Set USD sell prices on inventory to see margins.</li> : null}
+              {margins.map((m) => (
+                <li key={m.id} className="flex justify-between gap-2 border-b border-white/[0.06] py-2 text-white/75">
+                  <Link href={`/admin/inventory/${m.id}`} className="hover:text-[var(--admin-accent)]">
+                    {m.name}
+                  </Link>
+                  <span className="text-[var(--admin-accent)]">{m.marginPct.toFixed(1)}%</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="admin-card p-6">
+            <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Recent activity</h2>
+            <ul className="mt-4 space-y-2 text-sm">
+              {activity.length === 0 ? <li className="text-white/40">No entries in the last two weeks.</li> : null}
+              {activity.map((a, i) => (
+                <li key={i} className="flex justify-between gap-2 border-b border-white/[0.06] py-2 text-white/75">
+                  <span>
+                    <span className="text-[10px] uppercase text-white/35">{a.kind}</span> · {a.label}
+                  </span>
+                  <span className="text-white/55">{formatSalonMoney(a.amountUsdCents, "USD")}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <div className="flex flex-wrap gap-2 pb-4">
             <Link
               href="/admin/sales/new"
-              className="rounded-full border border-white/18 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85"
+              className="inline-flex min-h-[2.75rem] items-center rounded-full bg-[var(--admin-accent)] px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black"
             >
-              Record product sale
+              Sale
             </Link>
             <Link
               href="/admin/services/new"
-              className="rounded-full border border-white/18 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85"
+              className="inline-flex min-h-[2.75rem] items-center rounded-full border border-white/18 px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85"
             >
-              Log service
+              Service
             </Link>
             <Link
-              href="/admin/purchases/new"
-              className="rounded-full border border-white/18 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85"
+              href="/admin/sales-log"
+              className="inline-flex min-h-[2.75rem] items-center rounded-full border border-white/18 px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85"
             >
-              New purchase
+              Sale log
             </Link>
+            {!staff ? (
+              <Link
+                href="/admin/purchases/new"
+                className="inline-flex min-h-[2.75rem] items-center rounded-full border border-white/18 px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85"
+              >
+                Restock
+              </Link>
+            ) : null}
           </div>
         </>
       ) : null}

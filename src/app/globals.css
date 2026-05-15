@@ -59,18 +59,19 @@
 /* Admin shell (scoped)                                                       */
 /* -------------------------------------------------------------------------- */
 [data-app="admin"] {
-  --admin-accent: #d4b896;
-  --admin-accent-soft: rgba(212, 184, 150, 0.14);
-  --admin-accent-dim: rgba(212, 184, 150, 0.12);
-  --admin-fg: #f7f4ef;
-  --admin-fg-muted: rgba(247, 244, 239, 0.52);
-  --admin-line: rgba(247, 244, 239, 0.09);
-  --admin-line-bright: rgba(247, 244, 239, 0.14);
-  --admin-surface: #070708;
-  --admin-elevated: #101014;
-  --admin-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 32px 72px -40px rgba(0, 0, 0, 0.85);
-  --admin-shadow-soft: 0 20px 48px -36px rgba(0, 0, 0, 0.55);
-  --admin-shadow-lift: 0 28px 56px -36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(212, 184, 150, 0.06);
+  --admin-accent: #e8c478;
+  --admin-accent-rose: #c98a9b;
+  --admin-accent-soft: rgba(232, 196, 120, 0.16);
+  --admin-accent-dim: rgba(201, 138, 155, 0.12);
+  --admin-fg: #fff9f7;
+  --admin-fg-muted: rgba(255, 249, 247, 0.52);
+  --admin-line: rgba(255, 249, 247, 0.1);
+  --admin-line-bright: rgba(232, 196, 120, 0.22);
+  --admin-surface: #070506;
+  --admin-elevated: #120d10;
+  --admin-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 32px 72px -40px rgba(0, 0, 0, 0.88);
+  --admin-shadow-soft: 0 20px 48px -36px rgba(0, 0, 0, 0.58);
+  --admin-shadow-lift: 0 28px 56px -36px rgba(0, 0, 0, 0.68), 0 0 0 1px rgba(232, 196, 120, 0.08);
   /* Sticky toolbars clear the blurred admin header */
   --admin-chrome-stack: 5.85rem;
 }
@@ -127,6 +128,22 @@
   -webkit-overflow-scrolling: touch;
   scrollbar-color: color-mix(in srgb, var(--admin-accent) 35%, transparent) transparent;
   scrollbar-width: thin;
+}
+
+[data-app="admin"] .admin-form-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  margin: 0 -1.25rem -1.25rem;
+  padding: 0.75rem 1.25rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--admin-line);
+  background: linear-gradient(
+    180deg,
+    rgba(10, 10, 12, 0.72) 0%,
+    rgba(10, 10, 12, 0.96) 32%,
+    rgba(8, 8, 10, 0.98) 100%
+  );
+  backdrop-filter: blur(12px);
 }
 
 [data-app="admin"] .admin-card-lift {

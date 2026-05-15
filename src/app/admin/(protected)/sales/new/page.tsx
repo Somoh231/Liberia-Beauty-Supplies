@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { SalonProductSaleForm } from "@/components/admin/salon-product-sale-form";
+import { SalonRetailSaleBatchForm } from "@/components/admin/salon-retail-sale-batch-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchInventoryItems } from "@/lib/admin/salon-queries";
 
-export const metadata: Metadata = { title: "Record sale" };
+export const metadata: Metadata = { title: "Sale" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminSalesNewPage() {
@@ -17,10 +17,10 @@ export default async function AdminSalesNewPage() {
         ← Dashboard
       </Link>
       <div>
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">Record product sale</h1>
-        <p className="mt-1 text-sm text-white/50">Reduces stock and records revenue and gross profit.</p>
+        <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">Sale</h1>
+        <p className="mt-1 text-sm text-white/50">Fast retail lines — stock and the sale log update automatically.</p>
       </div>
-      <SalonProductSaleForm items={items} />
+      <SalonRetailSaleBatchForm items={items} />
     </div>
   );
 }

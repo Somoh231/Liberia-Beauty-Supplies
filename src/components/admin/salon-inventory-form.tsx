@@ -46,6 +46,11 @@ export function SalonInventoryNewForm({ supplierOptions }: { supplierOptions: { 
             costCurrency: normalizeCurrency(String(fd.get("cost_currency") ?? "NGN")),
             sellingPrice: String(fd.get("sell_price") ?? "") || null,
             sellingPriceCurrency: normalizeCurrency(String(fd.get("price_currency") ?? "NGN")),
+            fxNgnPerUsd: String(fd.get("fx_ngn_usd") ?? "") || null,
+            landedUsd: String(fd.get("landed_usd") ?? "") || null,
+            storePriceUsd: String(fd.get("store_price_usd") ?? "") || null,
+            sellPriceUsd: String(fd.get("sell_price_usd") ?? "") || null,
+            sellPriceLd: String(fd.get("sell_price_ld") ?? "") || null,
           });
           if (!r.ok) {
             setErr(r.error.replace(/_/g, " "));
@@ -128,6 +133,31 @@ export function SalonInventoryNewForm({ supplierOptions }: { supplierOptions: { 
           {currencySelect("price_currency", "NGN")}
         </label>
       </div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">Nigeria → Liberia costing (optional)</p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block text-xs text-white/55">
+          FX (NGN per 1 USD)
+          <input name="fx_ngn_usd" type="number" step="0.01" min="0" className={field} placeholder="e.g. 1550" />
+        </label>
+        <label className="block text-xs text-white/55">
+          Landed cost (USD / unit)
+          <input name="landed_usd" type="number" step="0.01" min="0" className={field} placeholder="0" />
+        </label>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <label className="block text-xs text-white/55">
+          Store price (USD)
+          <input name="store_price_usd" type="number" step="0.01" min="0" className={field} />
+        </label>
+        <label className="block text-xs text-white/55">
+          Sell price (USD)
+          <input name="sell_price_usd" type="number" step="0.01" min="0" className={field} />
+        </label>
+        <label className="block text-xs text-white/55">
+          Sell price (LD)
+          <input name="sell_price_ld" type="number" step="0.01" min="0" className={field} />
+        </label>
+      </div>
       <button
         type="submit"
         disabled={pending}
@@ -168,6 +198,11 @@ export function SalonInventoryEditForm({ item, supplierOptions }: { item: Invent
             sellingPrice: String(fd.get("sell_price") ?? "") || null,
             sellingPriceCurrency: normalizeCurrency(String(fd.get("price_currency") ?? item.default_price_currency)),
             active: fd.get("active") === "on",
+            fxNgnPerUsd: String(fd.get("fx_ngn_usd") ?? "") || null,
+            landedUsd: String(fd.get("landed_usd") ?? "") || null,
+            storePriceUsd: String(fd.get("store_price_usd") ?? "") || null,
+            sellPriceUsd: String(fd.get("sell_price_usd") ?? "") || null,
+            sellPriceLd: String(fd.get("sell_price_ld") ?? "") || null,
           });
           if (!r.ok) {
             setErr(r.error.replace(/_/g, " "));
@@ -282,6 +317,67 @@ export function SalonInventoryEditForm({ item, supplierOptions }: { item: Invent
             <option value="USD">USD</option>
             <option value="LRD">LRD</option>
           </select>
+        </label>
+      </div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">Nigeria → Liberia costing</p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block text-xs text-white/55">
+          FX (NGN per 1 USD)
+          <input
+            name="fx_ngn_usd"
+            type="number"
+            step="0.01"
+            min="0"
+            className={field}
+            defaultValue={item.fx_ngn_per_usd != null ? String(item.fx_ngn_per_usd) : ""}
+            placeholder="e.g. 1550"
+          />
+        </label>
+        <label className="block text-xs text-white/55">
+          Landed cost (USD / unit)
+          <input
+            name="landed_usd"
+            type="number"
+            step="0.01"
+            min="0"
+            className={field}
+            defaultValue={((item.landed_usd_cents_per_unit ?? 0) / 100).toFixed(2)}
+          />
+        </label>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <label className="block text-xs text-white/55">
+          Store price (USD)
+          <input
+            name="store_price_usd"
+            type="number"
+            step="0.01"
+            min="0"
+            className={field}
+            defaultValue={item.store_price_usd_cents != null ? (item.store_price_usd_cents / 100).toFixed(2) : ""}
+          />
+        </label>
+        <label className="block text-xs text-white/55">
+          Sell price (USD)
+          <input
+            name="sell_price_usd"
+            type="number"
+            step="0.01"
+            min="0"
+            className={field}
+            defaultValue={item.sell_price_usd_cents != null ? (item.sell_price_usd_cents / 100).toFixed(2) : ""}
+          />
+        </label>
+        <label className="block text-xs text-white/55">
+          Sell price (LD)
+          <input
+            name="sell_price_ld"
+            type="number"
+            step="0.01"
+            min="0"
+            className={field}
+            defaultValue={item.sell_price_lrd_cents != null ? (item.sell_price_lrd_cents / 100).toFixed(2) : ""}
+          />
         </label>
       </div>
       <button

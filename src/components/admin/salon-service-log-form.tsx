@@ -36,6 +36,9 @@ export function SalonServiceLogForm({ items }: { items: InventoryItemRow[] }) {
             currency: normalizeCurrency(String(fd.get("currency") ?? "NGN")),
             staffName: String(fd.get("staff") ?? "") || null,
             clientNote: String(fd.get("note") ?? "") || null,
+            customerName: String(fd.get("customer_name") ?? "") || null,
+            customerPhone: String(fd.get("customer_phone") ?? "") || null,
+            customerFacebook: String(fd.get("customer_facebook") ?? "") || null,
             productUsage: usage,
           });
           if (!r.ok) {
@@ -71,6 +74,20 @@ export function SalonServiceLogForm({ items }: { items: InventoryItemRow[] }) {
         Staff (optional)
         <input name="staff" className={field} />
       </label>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="block text-xs text-white/55">
+          Client name
+          <input name="customer_name" className={field} placeholder="Optional" autoComplete="name" />
+        </label>
+        <label className="block text-xs text-white/55">
+          Phone
+          <input name="customer_phone" className={field} placeholder="Optional" inputMode="tel" autoComplete="tel" />
+        </label>
+        <label className="block text-xs text-white/55">
+          Facebook
+          <input name="customer_facebook" className={field} placeholder="Optional" />
+        </label>
+      </div>
       <label className="block text-xs text-white/55">
         Note (optional)
         <input name="note" className={field} />

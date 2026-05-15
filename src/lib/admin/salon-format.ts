@@ -39,6 +39,12 @@ export function parseQty(raw: string | number | undefined | null): number | null
 
 export function normalizeCurrency(raw: string | undefined | null): SalonCurrency {
   const u = (raw ?? "NGN").toUpperCase();
-  if (u === "USD" || u === "LRD" || u === "NGN") return u;
+  if (u === "USD" || u === "LRD" || u === "LD" || u === "NGN") return u === "LD" ? "LRD" : u;
   return "NGN";
+}
+
+/** Display label for LRD in UI (ISO code remains LRD in DB). */
+export function currencyShortLabel(c: SalonCurrency): string {
+  if (c === "LRD") return "LD";
+  return c;
 }

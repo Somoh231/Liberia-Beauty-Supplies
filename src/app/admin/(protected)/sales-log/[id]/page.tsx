@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { WeeklySalesLogDetail } from "@/components/admin/weekly-sales-log-detail";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchInventoryProducts, fetchWeeklyReport, type MoneyBag } from "@/lib/admin/salon-queries";
 import type { SalonCurrency } from "@/lib/admin/salon-format";
+import { isSalonStaffRole, requireAdminContext } from "@/lib/auth/admin-context";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,9 @@ function addMinor(bag: MoneyBag, currency: SalonCurrency, minor: number) {
 }
 
 export default async function AdminSalesLogDetailPage({ params }: Props) {
+  const ctx = await requireAdminContext();
+  if (isSalonStaffRole(ctx.roleSlug)) redirect("/admin/sales-log");
+
   const { id } = await params;
   const supabase = await createSupabaseServerClient();
   const [{ report, products, services, spaces }, inventory] = await Promise.all([

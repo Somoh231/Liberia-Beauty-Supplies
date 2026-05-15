@@ -29,8 +29,11 @@ export function NewWeeklySalesReportForm() {
   }, []);
 
   return (
-    <section className="admin-card space-y-4 p-6">
-      <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Start new weekly report</h2>
+    <section className="space-y-4">
+      <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Start archived weekly report</h2>
+      <p className="text-xs text-white/40">
+        For historical filing only. Operational sales and services use the Sale and Service modules.
+      </p>
       {err ? <p className="text-sm text-red-300">{err}</p> : null}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <label className="block text-xs text-white/55">

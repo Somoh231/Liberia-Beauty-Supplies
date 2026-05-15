@@ -1,6 +1,6 @@
 "use server";
 
-import { getAdminContext } from "@/lib/auth/admin-context";
+import { getAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 import { normalizeCurrency, parseMoneyToCents, parseQty, type SalonCurrency } from "@/lib/admin/salon-format";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -25,6 +25,7 @@ export async function createWeeklyReportAction(input: {
 }): Promise<WeeklyLogResult & { id?: string }> {
   const ctx = await getAdminContext();
   if (!ctx) return { ok: false, error: "unauthorized" };
+  if (isSalonStaffRole(ctx.roleSlug)) return { ok: false, error: "forbidden_staff_role" };
   const sd = input.startDate?.trim();
   const ed = input.endDate?.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(sd) || !/^\d{4}-\d{2}-\d{2}$/.test(ed)) return { ok: false, error: "invalid_date" };
@@ -61,6 +62,7 @@ export async function updateWeeklyReportHeaderAction(input: {
   if (!isUuid(input.id)) return { ok: false, error: "invalid_id" };
   const ctx = await getAdminContext();
   if (!ctx) return { ok: false, error: "unauthorized" };
+  if (isSalonStaffRole(ctx.roleSlug)) return { ok: false, error: "forbidden_staff_role" };
   const sd = input.startDate?.trim();
   const ed = input.endDate?.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(sd) || !/^\d{4}-\d{2}-\d{2}$/.test(ed)) return { ok: false, error: "invalid_date" };
@@ -94,6 +96,7 @@ export async function addWeeklyProductSaleAction(input: {
   if (!isUuid(input.reportId) || !isUuid(input.inventoryItemId)) return { ok: false, error: "invalid_id" };
   const ctx = await getAdminContext();
   if (!ctx) return { ok: false, error: "unauthorized" };
+  if (isSalonStaffRole(ctx.roleSlug)) return { ok: false, error: "forbidden_staff_role" };
   const d = input.dayDate?.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, error: "invalid_day" };
   const qty = parseQty(input.qtySold);
@@ -140,6 +143,7 @@ export async function addWeeklyServiceSaleAction(input: {
   if (!isUuid(input.reportId)) return { ok: false, error: "invalid_id" };
   const ctx = await getAdminContext();
   if (!ctx) return { ok: false, error: "unauthorized" };
+  if (isSalonStaffRole(ctx.roleSlug)) return { ok: false, error: "forbidden_staff_role" };
   const d = input.dayDate?.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, error: "invalid_day" };
   const name = input.serviceName?.trim() ?? "";
@@ -179,6 +183,7 @@ export async function addWeeklySpacePaymentAction(input: {
   if (!isUuid(input.reportId)) return { ok: false, error: "invalid_id" };
   const ctx = await getAdminContext();
   if (!ctx) return { ok: false, error: "unauthorized" };
+  if (isSalonStaffRole(ctx.roleSlug)) return { ok: false, error: "forbidden_staff_role" };
   const sn = input.stylistName?.trim() ?? "";
   if (sn.length < 2) return { ok: false, error: "invalid_stylist" };
   const ap = parseMoneyToCents(input.amountPaidMajor) ?? 0;

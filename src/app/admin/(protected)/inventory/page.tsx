@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchInventoryProductsPage, fetchInventoryStatusSummary } from "@/lib/admin/salon-queries";
+import { fetchInventoryProductsPage, fetchInventoryStatusSummary, fetchLastMovementByItemIds, fetchOperationalSettings } from "@/lib/admin/salon-queries";
 import { formatSalonMoney, type StockStatus } from "@/lib/admin/salon-format";
-import { effectiveUnitCostUsdCents, unitGrossProfitUsdCents } from "@/lib/admin/salon-finance";
+import { effectiveUnitCostUsdCents, resolveOperationalFxFromSettings, unitGrossMarginPct, unitGrossProfitUsdCents } from "@/lib/admin/pricing-engine";
 import { cn } from "@/lib/utils";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 
@@ -30,6 +30,14 @@ function statusBadge(status: StockStatus | null) {
   );
 }
 
+function marginEconomyHint(m: number | null): { label: string; cls: string } | null {
+  if (m == null || !Number.isFinite(m)) return null;
+  if (m < 0) return { label: "Sub cost", cls: "border-red-500/35 text-red-100/90 bg-red-500/[0.08]" };
+  if (m < 12) return { label: "Tight", cls: "border-amber-500/30 text-amber-100/85 bg-amber-500/[0.07]" };
+  if (m >= 35) return { label: "Solid", cls: "border-emerald-500/30 text-emerald-100/90 bg-emerald-500/[0.08]" };
+  return null;
+}
+
 export default async function AdminInventoryPage({ searchParams }: { searchParams: Promise<Search> }) {
   const ctx = await requireAdminContext();
   const sp = await searchParams;
@@ -40,13 +48,21 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
     st === "in_stock" || st === "low_stock" || st === "out_of_stock" ? st : "all";
 
   const supabase = await createSupabaseServerClient();
-  const [{ rows: items, total, page: curPage, pageSize }, summary] = await Promise.all([
+  const [{ rows: items, total, page: curPage, pageSize }, summary, settings] = await Promise.all([
     fetchInventoryProductsPage(supabase, { q, status: statusFilter, page, pageSize: 15 }),
     fetchInventoryStatusSummary(supabase),
+    fetchOperationalSettings(supabase),
   ]);
+  const lastById = await fetchLastMovementByItemIds(
+    supabase,
+    items.map((i) => i.id),
+  );
 
   const staff = isSalonStaffRole(ctx.roleSlug);
+  const canImport = ctx.isManagerOrAbove;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const opFx = resolveOperationalFxFromSettings(settings);
+  const defaultNgnPerUsd = opFx.ngnPerUsd;
 
   const filterLink = (status: StockStatus | "all", label: string) => {
     const params = new URLSearchParams();
@@ -83,7 +99,9 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">Inventory</h1>
-          <p className="mt-1 text-sm text-white/50">Retail stock, landed cost in USD, and target sell prices.</p>
+          <p className="mt-1 text-sm text-white/50">
+            Supplier → FX → landed (WAC) → wholesale → retail → margin. Same FX as purchases, sales, and dashboard.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {!staff ? (
@@ -100,6 +118,14 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
               className="inline-flex min-h-[2.75rem] items-center justify-center rounded-full border border-white/18 px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85 sm:min-h-0"
             >
               Supplier restock
+            </Link>
+          ) : null}
+          {canImport ? (
+            <Link
+              href="/admin/inventory/import"
+              className="inline-flex min-h-[2.75rem] items-center justify-center rounded-full border border-violet-500/35 bg-violet-500/[0.08] px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-100/90 sm:min-h-0"
+            >
+              Import preview
             </Link>
           ) : null}
         </div>
@@ -145,18 +171,21 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
       </div>
 
       <div className="admin-card admin-x-scroll overflow-x-auto">
-        <table className="w-full min-w-[920px] text-left text-sm">
+        <table className="w-full min-w-[1120px] text-left text-sm">
           <thead>
             <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/45">
               <th className="px-3 py-3">Product</th>
               <th className="px-3 py-3">Status</th>
               <th className="px-3 py-3">Qty</th>
-              <th className="px-3 py-3">Unit cost (NGN)</th>
-              <th className="px-3 py-3">Conv. $</th>
-              <th className="px-3 py-3">Store $</th>
-              <th className="px-3 py-3">Sell $</th>
-              <th className="px-3 py-3">Sell LD</th>
-              <th className="px-3 py-3">Gross $</th>
+              <th className="px-3 py-3">Supplier</th>
+              <th className="px-3 py-3">FX ₦/$</th>
+              <th className="px-3 py-3">Landed (WAC) $</th>
+              <th className="px-3 py-3">Wholesale $</th>
+              <th className="px-3 py-3">Retail $</th>
+              <th className="px-3 py-3">Retail LD</th>
+              <th className="px-3 py-3">GP / unit $</th>
+              <th className="px-3 py-3">Margin</th>
+              <th className="px-3 py-3 hidden lg:table-cell">Last movement</th>
               <th className="px-3 py-3"> </th>
             </tr>
           </thead>
@@ -164,12 +193,27 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
             {items.map((row) => {
               const usdUnit = effectiveUnitCostUsdCents(row);
               const gross = unitGrossProfitUsdCents(row);
-              const ngnUnit =
-                row.cost_currency === "NGN" ? formatSalonMoney(row.avg_unit_cost_cents, "NGN") : formatSalonMoney(row.avg_unit_cost_cents, row.cost_currency);
+              const margin = unitGrossMarginPct(row);
+              const supplierCell =
+                row.cost_currency === "NGN"
+                  ? formatSalonMoney(row.avg_unit_cost_cents, "NGN")
+                  : formatSalonMoney(row.avg_unit_cost_cents, row.cost_currency);
+              const fxCell =
+                row.cost_currency === "NGN" ? String(Math.round(row.fx_ngn_per_usd ?? defaultNgnPerUsd)) : "—";
               return (
                 <tr key={row.id} className="border-b border-white/[0.06]">
                   <td className="px-3 py-3 text-white">
                     <span className="font-medium">{row.product_name}</span>
+                    {row.stock_status === "low_stock" ? (
+                      <span className="ml-1.5 inline-flex rounded-full border border-amber-500/35 bg-amber-500/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-100/85">
+                        Low
+                      </span>
+                    ) : null}
+                    {row.stock_status === "out_of_stock" ? (
+                      <span className="ml-1.5 inline-flex rounded-full border border-red-500/30 bg-red-500/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-red-100/85">
+                        Out
+                      </span>
+                    ) : null}
                     <span className="ml-2 font-mono text-[10px] text-white/35">{row.product_code}</span>
                     {!row.active ? <span className="ml-2 text-[10px] uppercase text-white/35">inactive</span> : null}
                   </td>
@@ -177,7 +221,8 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
                   <td className="px-3 py-3 text-white/85">
                     {row.quantity_on_hand} <span className="text-white/40">{row.unit}</span>
                   </td>
-                  <td className="px-3 py-3 text-white/75">{row.cost_currency === "NGN" ? ngnUnit : "—"}</td>
+                  <td className="px-3 py-3 text-white/75">{supplierCell}</td>
+                  <td className="px-3 py-3 text-white/75">{fxCell}</td>
                   <td className="px-3 py-3 text-white/75">{formatSalonMoney(usdUnit, "USD")}</td>
                   <td className="px-3 py-3 text-white/75">
                     {row.store_price_usd_cents != null ? formatSalonMoney(row.store_price_usd_cents, "USD") : "—"}
@@ -189,6 +234,38 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
                     {row.sell_price_lrd_cents != null ? formatSalonMoney(row.sell_price_lrd_cents, "LRD") : "—"}
                   </td>
                   <td className="px-3 py-3 text-white/75">{gross != null ? formatSalonMoney(gross, "USD") : "—"}</td>
+                  <td className="px-3 py-3 text-white/75">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>{margin != null ? `${margin.toFixed(1)}%` : "—"}</span>
+                      {(() => {
+                        const hint = marginEconomyHint(margin);
+                        return hint ? (
+                          <span
+                            className={cn(
+                              "rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
+                              hint.cls,
+                            )}
+                          >
+                            {hint.label}
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-white/75 hidden lg:table-cell">
+                    {(() => {
+                      const lm = lastById[row.id];
+                      if (!lm) return <span className="text-white/35">—</span>;
+                      const ch = lm.quantity_change;
+                      const sign = ch > 0 ? "+" : "";
+                      return (
+                        <span className="text-[11px] text-white/60" title={new Date(lm.created_at).toLocaleString()}>
+                          <span className="text-white/75">{lm.movement_type.replace(/_/g, " ")}</span> · {sign}
+                          {ch}
+                        </span>
+                      );
+                    })()}
+                  </td>
                   <td className="px-3 py-3 text-right">
                     <Link
                       href={`/admin/inventory/${row.id}`}

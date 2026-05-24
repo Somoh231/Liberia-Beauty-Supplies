@@ -7,11 +7,32 @@ import {
   fetchLowStockAlerts,
   fetchTodayRevenueSnapshot,
   fetchSaleLogAnalytics,
+  fetchDashboardTrustSignals,
 } from "@/lib/admin/salon-queries";
 import { formatSalonMoney } from "@/lib/admin/salon-format";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { AdminDashboardCharts } from "@/components/admin/admin-dashboard-charts";
+
+function buildRevenueTrendSeries(
+  product: Record<string, number>,
+  service: Record<string, number>,
+  tailDays: number,
+) {
+  const keys = [...new Set([...Object.keys(product), ...Object.keys(service)])].sort();
+  const tail = keys.slice(-tailDays);
+  return tail.map((day) => ({
+    day,
+    retail: product[day] ?? 0,
+    service: service[day] ?? 0,
+  }));
+}
+
+function buildGrossProfitSeries(gpByDay: Record<string, number>, tailDays: number) {
+  const keys = Object.keys(gpByDay).sort().slice(-tailDays);
+  return keys.map((day) => ({ day, gp: gpByDay[day] ?? 0 }));
+}
 
 export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
@@ -28,24 +49,29 @@ export default async function AdminDashboardPage() {
   let today: Awaited<ReturnType<typeof fetchTodayRevenueSnapshot>> | null = null;
   let topProducts: Awaited<ReturnType<typeof fetchSaleLogAnalytics>>["topProducts"] = [];
   let topServices: Awaited<ReturnType<typeof fetchSaleLogAnalytics>>["topServices"] = [];
+  let saleLogAnalytics: Awaited<ReturnType<typeof fetchSaleLogAnalytics>> | null = null;
+  let trust: Awaited<ReturnType<typeof fetchDashboardTrustSignals>> | null = null;
 
   try {
     const supabase = await createSupabaseServerClient();
-    const [r, act, m, ls, t, analytics] = await Promise.all([
+    const [r, act, m, ls, t, analytics, tr] = await Promise.all([
       fetchDashboardRollup(supabase),
       fetchRecentActivity(supabase, 10),
       fetchTopMarginProducts(supabase, 5),
       fetchLowStockAlerts(supabase, 8),
       fetchTodayRevenueSnapshot(supabase),
       fetchSaleLogAnalytics(supabase),
+      fetchDashboardTrustSignals(supabase),
     ]);
     rollup = r;
     activity = act;
     margins = m;
     lowStock = ls;
     today = t;
+    saleLogAnalytics = analytics;
     topProducts = analytics.topProducts.slice(0, 5);
     topServices = analytics.topServices.slice(0, 5);
+    trust = tr;
   } catch (e) {
     err = e instanceof Error ? e.message : "Could not load dashboard.";
   }
@@ -63,6 +89,21 @@ export default async function AdminDashboardPage() {
     : 0;
   const grossProfit30d = rollup?.totalsLast30.productGrossProfitUsd ?? 0;
 
+  const chartPayload =
+    rollup && saleLogAnalytics
+      ? {
+          revenueTrend: buildRevenueTrendSeries(rollup.productRevenueUsdByDay, rollup.serviceRevenueUsdByDay, 62),
+          grossProfitTrend: buildGrossProfitSeries(rollup.productGrossProfitUsdByDay, 62),
+          topProductsByQty: saleLogAnalytics.topProductsByQty.map((p) => ({ name: p.name, qty: p.qty })),
+          serviceMix: saleLogAnalytics.serviceCategoryMixLast30,
+          inventoryHealth: {
+            in_stock: rollup.inStockCount,
+            low_stock: rollup.lowStockCount,
+            out_of_stock: rollup.outOfStockCount,
+          },
+        }
+      : null;
+
   return (
     <div className="mx-auto max-w-6xl space-y-8 pb-10">
       <header className="space-y-2">
@@ -76,7 +117,68 @@ export default async function AdminDashboardPage() {
         <section className="admin-card border border-red-500/25 bg-red-500/[0.08] p-6">
           <p className="text-sm text-red-100/90">{err}</p>
         </section>
-      ) : rollup && today ? (
+      ) : null}
+      {trust && !err ? (
+        <section className="admin-card border border-white/[0.07] bg-white/[0.02] p-4">
+          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Trust &amp; reconciliation</h2>
+          <ul className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/70">
+            <li
+              className={cn(
+                "rounded-full border px-2.5 py-1",
+                trust.reconciliationLabel === "reconciled"
+                  ? "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-100/90"
+                  : trust.reconciliationLabel === "variance"
+                    ? "border-amber-500/35 bg-amber-500/[0.07] text-amber-50/90"
+                    : "border-white/12 bg-black/25 text-white/60",
+              )}
+            >
+              {trust.reconciliationLabel === "reconciled"
+                ? "Reconciled today"
+                : trust.reconciliationLabel === "variance"
+                  ? "Variance today"
+                  : "Pending reconciliation"}
+            </li>
+            <li className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1">
+              Low stock SKUs: <span className="text-white/85">{trust.lowStockCount}</span>
+            </li>
+            <li
+              className={cn(
+                "rounded-full border px-2.5 py-1",
+                trust.negativeMarginSkuCount > 0
+                  ? "border-red-500/35 bg-red-500/[0.06] text-red-50/90"
+                  : "border-white/10 bg-black/20",
+              )}
+            >
+              Below-cost retail: <span className="text-white/85">{trust.negativeMarginSkuCount}</span>
+            </li>
+            {trust.tightMarginSkuCount > 0 ? (
+              <li className="rounded-full border border-amber-500/25 bg-amber-500/[0.05] px-2.5 py-1 text-amber-50/85">
+                Tight margin (&lt;{trust.marginWarningPct.toFixed(0)}%): {trust.tightMarginSkuCount}
+              </li>
+            ) : null}
+            <li className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-white/60">
+              Inventory updated:{" "}
+              {trust.inventoryValuationUpdatedAt
+                ? new Date(trust.inventoryValuationUpdatedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
+                : "—"}
+            </li>
+            <li className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-white/60">
+              Last stock activity:{" "}
+              {trust.lastInventoryMovementAt
+                ? new Date(trust.lastInventoryMovementAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
+                : "—"}
+            </li>
+            <li className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-white/60">
+              Last restock (purchase):{" "}
+              {trust.lastRestockMovementAt
+                ? new Date(trust.lastRestockMovementAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
+                : "—"}
+            </li>
+          </ul>
+        </section>
+      ) : null}
+
+      {err ? null : rollup && today ? (
         <>
           {(rollup.lowStockCount > 0 || rollup.outOfStockCount > 0) && lowStock.length > 0 ? (
             <section className="admin-card border-amber-500/25 bg-amber-500/[0.06] p-5">
@@ -130,6 +232,8 @@ export default async function AdminDashboardPage() {
               </p>
             </div>
           </div>
+
+          {chartPayload ? <AdminDashboardCharts data={chartPayload} /> : null}
 
           <section className="admin-card p-5">
             <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Today&apos;s revenue</h2>

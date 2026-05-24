@@ -11,6 +11,11 @@ export function getMonroviaDayKey(d: Date = new Date()): string {
   }).format(d);
 }
 
+/** Inclusive UTC window matching `fetchTodayRevenueSnapshot` (Monrovia calendar day). */
+export function monroviaDayUtcWindow(dayKey: string): { startIso: string; endIso: string } {
+  return { startIso: `${dayKey}T00:00:00.000Z`, endIso: `${dayKey}T23:59:59.999Z` };
+}
+
 export function formatSalonMoney(minorUnits: number, currency: SalonCurrency): string {
   const locale =
     currency === "USD" ? "en-US" : currency === "NGN" ? "en-NG" : "en-LR";

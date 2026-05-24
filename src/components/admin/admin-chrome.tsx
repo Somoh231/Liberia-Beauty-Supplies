@@ -25,9 +25,26 @@ function navActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function AdminChrome({ email, roleSlug }: { email: string; roleSlug: AdminPortalRole }) {
+export function AdminChrome({
+  email,
+  roleSlug,
+  showOpsTrustLinks = false,
+}: {
+  email: string;
+  roleSlug: AdminPortalRole;
+  /** Owner / manager / legacy admin — reconciliation and operational settings */
+  showOpsTrustLinks?: boolean;
+}) {
   const pathname = usePathname() || "";
   const nav = navForRole(roleSlug);
+
+  const opsExtras =
+    showOpsTrustLinks && !isSalonStaffRole(roleSlug)
+      ? ([
+          { href: "/admin/reconcile", label: "Reconcile" },
+          { href: "/admin/settings", label: "Settings" },
+        ] as const)
+      : ([] as const);
 
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--admin-line)] bg-[#060607]/72 text-[var(--admin-fg)] backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-[#060607]/55 print:hidden">
@@ -53,6 +70,21 @@ export function AdminChrome({ email, roleSlug }: { email: string; roleSlug: Admi
         </div>
         <nav className="flex flex-wrap items-center gap-1.5 sm:gap-2" aria-label="Admin">
           {nav.map((item) => {
+            const active = navActive(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "rounded-full px-3.5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-fg-muted)] transition duration-200 [transition-timing-function:var(--ease-out)] hover:bg-white/[0.06] hover:text-[var(--admin-fg)] active:scale-[0.98]",
+                  active && "bg-white/[0.09] text-[var(--admin-fg)] ring-1 ring-[var(--admin-line-bright)]",
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+          {opsExtras.map((item) => {
             const active = navActive(pathname, item.href);
             return (
               <Link

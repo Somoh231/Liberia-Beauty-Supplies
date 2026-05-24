@@ -4,7 +4,7 @@ import { createServiceLogsBatchAction, type ServiceLogLineInput } from "@/app/ac
 import { SERVICE_CATEGORY_OPTIONS } from "@/lib/admin/salon-finance";
 import { currencyShortLabel, normalizeCurrency, type SalonCurrency } from "@/lib/admin/salon-format";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 const field =
   "mt-1 w-full min-h-[2.75rem] rounded-xl border border-white/12 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-white/35 focus:border-[var(--admin-accent)]/45 focus:outline-none focus:ring-1 focus:ring-[var(--admin-accent)]/30 sm:min-h-0";
@@ -28,12 +28,73 @@ function newRow(): Row {
   };
 }
 
+const SERVICE_DRAFT_KEY = "salon_draft_service_batch_v1";
+
 export function SalonServiceBatchForm() {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [serviceDate, setServiceDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [rows, setRows] = useState<Row[]>(() => Array.from({ length: 5 }, newRow));
+  const submitLockRef = useRef(false);
+  const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    try {
+      const raw = localStorage.getItem(SERVICE_DRAFT_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { serviceDate?: string; rows?: Row[] };
+      if (!parsed?.rows?.length) return;
+      if (window.confirm("Restore unsaved service draft from this device?")) {
+        if (parsed.serviceDate && /^\d{4}-\d{2}-\d{2}$/.test(parsed.serviceDate)) setServiceDate(parsed.serviceDate);
+        setRows(
+          parsed.rows.map((r) => ({
+            ...newRow(),
+            ...r,
+            key: r.key && typeof r.key === "string" ? r.key : crypto.randomUUID(),
+          })),
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const draftDirty = useMemo(
+    () =>
+      rows.some(
+        (r) =>
+          (r.revenue && r.revenue.trim() !== "") ||
+          (r.staffName && r.staffName.trim() !== "") ||
+          (r.notes && r.notes.trim() !== "") ||
+          (r.customerName && r.customerName.trim() !== "") ||
+          (r.customerPhone && r.customerPhone.trim() !== "") ||
+          (r.customerFacebook && r.customerFacebook.trim() !== ""),
+      ),
+    [rows],
+  );
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      if (!draftDirty) {
+        localStorage.removeItem(SERVICE_DRAFT_KEY);
+        return;
+      }
+      localStorage.setItem(SERVICE_DRAFT_KEY, JSON.stringify({ serviceDate, rows }));
+    }, 600);
+    return () => window.clearTimeout(t);
+  }, [rows, serviceDate, draftDirty]);
+
+  useEffect(() => {
+    if (!draftDirty) return;
+    const onBefore = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBefore);
+    return () => window.removeEventListener("beforeunload", onBefore);
+  }, [draftDirty]);
 
   const totals = rows.reduce(
     (acc, r) => {
@@ -72,26 +133,33 @@ export function SalonServiceBatchForm() {
         onSubmit={(e) => {
           e.preventDefault();
           setErr(null);
+          if (submitLockRef.current || pending) return;
+          submitLockRef.current = true;
           start(async () => {
-            const lines: ServiceLogLineInput[] = rows
-              .filter((r) => r.serviceCategory && r.revenue)
-              .map((r) => ({
-                serviceCategory: r.serviceCategory,
-                revenue: r.revenue,
-                currency: normalizeCurrency(r.currency),
-                staffName: r.staffName || null,
-                notes: r.notes || null,
-                customerName: r.customerName || null,
-                customerPhone: r.customerPhone || null,
-                customerFacebook: r.customerFacebook || null,
-              }));
-            const res = await createServiceLogsBatchAction({ serviceDate, lines });
-            if (!res.ok) {
-              setErr(res.error.replace(/_/g, " "));
-              return;
+            try {
+              const lines: ServiceLogLineInput[] = rows
+                .filter((r) => r.serviceCategory && r.revenue)
+                .map((r) => ({
+                  serviceCategory: r.serviceCategory,
+                  revenue: r.revenue,
+                  currency: normalizeCurrency(r.currency),
+                  staffName: r.staffName || null,
+                  notes: r.notes || null,
+                  customerName: r.customerName || null,
+                  customerPhone: r.customerPhone || null,
+                  customerFacebook: r.customerFacebook || null,
+                }));
+              const res = await createServiceLogsBatchAction({ serviceDate, lines });
+              if (!res.ok) {
+                setErr(res.error.replace(/_/g, " "));
+                return;
+              }
+              localStorage.removeItem(SERVICE_DRAFT_KEY);
+              setRows(Array.from({ length: 5 }, newRow));
+              router.refresh();
+            } finally {
+              submitLockRef.current = false;
             }
-            setRows(Array.from({ length: 5 }, newRow));
-            router.refresh();
           });
         }}
       >

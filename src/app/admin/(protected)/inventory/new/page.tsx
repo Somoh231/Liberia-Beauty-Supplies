@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { SalonInventoryNewForm } from "@/components/admin/salon-inventory-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchSuppliers } from "@/lib/admin/salon-queries";
+import { fetchOperationalSettings, fetchSuppliers } from "@/lib/admin/salon-queries";
+import { formatOperationalFxSummaryLineFromRates, resolveOperationalFxFromSettings } from "@/lib/admin/pricing-engine";
 import { isSalonStaffRole, requireAdminContext } from "@/lib/auth/admin-context";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -14,7 +15,8 @@ export default async function AdminInventoryNewPage() {
   if (isSalonStaffRole(ctx.roleSlug)) redirect("/admin/inventory");
 
   const supabase = await createSupabaseServerClient();
-  const suppliers = await fetchSuppliers(supabase);
+  const [suppliers, settings] = await Promise.all([fetchSuppliers(supabase), fetchOperationalSettings(supabase)]);
+  const fxLine = formatOperationalFxSummaryLineFromRates(resolveOperationalFxFromSettings(settings));
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 pb-10">
@@ -22,7 +24,7 @@ export default async function AdminInventoryNewPage() {
         ← Inventory
       </Link>
       <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">New product</h1>
-      <SalonInventoryNewForm supplierOptions={suppliers.map((s) => ({ id: s.id, name: s.name }))} />
+      <SalonInventoryNewForm supplierOptions={suppliers.map((s) => ({ id: s.id, name: s.name }))} fxSummaryLine={fxLine} />
     </div>
   );
 }

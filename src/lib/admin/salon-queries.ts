@@ -1,9 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getMonroviaDayKey, type SalonCurrency, type StockStatus } from "@/lib/admin/salon-format";
-import { effectiveUnitCostUsdCents, inventoryValueUsdCents, lineRevenueUsdEquivCents, unitGrossMarginPct } from "@/lib/admin/salon-finance";
+import { getMonroviaDayKey, monroviaDayUtcWindow, type SalonCurrency, type StockStatus } from "@/lib/admin/salon-format";
+import { effectiveUnitCostUsdCents, inventoryValueUsdCents, lineRevenueUsdEquivCents, unitGrossMarginPct } from "@/lib/admin/pricing-engine";
 
 const INV_SELECT =
-  "id,product_code,product_name,name,quantity_on_hand,reorder_point,reorder_level,low_stock_threshold,stock_status,avg_unit_cost_cents,total_stock_value_minor,cost_currency,default_unit_price_cents,default_price_currency,category,supplier_id,notes,unit,sku,active,deleted_at,created_at,updated_at,fx_ngn_per_usd,landed_usd_cents_per_unit,store_price_usd_cents,sell_price_usd_cents,sell_price_lrd_cents,weighted_avg_landed_usd_cents";
+  "id,product_code,product_name,name,quantity_on_hand,reorder_point,reorder_level,low_stock_threshold,stock_status,avg_unit_cost_cents,total_stock_value_minor,cost_currency,default_unit_price_cents,default_price_currency,category,supplier_id,notes,unit,sku,active,deleted_at,created_at,updated_at,updated_by,last_override_at,last_override_by,last_override_reason,fx_ngn_per_usd,landed_usd_cents_per_unit,store_price_usd_cents,sell_price_usd_cents,sell_price_lrd_cents,weighted_avg_landed_usd_cents,is_addon,import_batch_id";
 
 export type SupplierRow = {
   id: string;
@@ -47,6 +47,12 @@ export type InventoryProductRow = {
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
+  updated_by?: string | null;
+  last_override_at?: string | null;
+  last_override_by?: string | null;
+  last_override_reason?: string | null;
+  is_addon?: boolean;
+  import_batch_id?: string | null;
 };
 
 /** @deprecated use InventoryProductRow */
@@ -426,6 +432,7 @@ function emptyBag(): MoneyBag {
 export type DashboardRollup = {
   lowStockCount: number;
   outOfStockCount: number;
+  inStockCount: number;
   inventoryValueUsdCents: number;
   /** Legacy: stock book value by recorded cost currency */
   inventoryValueByCurrency: MoneyBag;
@@ -517,6 +524,7 @@ export async function fetchDashboardRollup(supabase: SupabaseClient): Promise<Da
   return {
     lowStockCount: statusSummary.low_stock,
     outOfStockCount: statusSummary.out_of_stock,
+    inStockCount: statusSummary.in_stock,
     inventoryValueUsdCents: inventoryValueUsdRollup,
     inventoryValueByCurrency,
     productRevenueUsdByDay,
@@ -552,7 +560,11 @@ export type SaleLogAnalytics = {
   monthNative: { retail: CurrencyTotals; service: CurrencyTotals };
   ytdNative: { retail: CurrencyTotals; service: CurrencyTotals };
   topProducts: { name: string; qty: number; revenueUsdCents: number }[];
+  /** Last 30 days — quantity sold, for operational charts */
+  topProductsByQty: { name: string; qty: number; revenueUsdCents: number }[];
   topServices: { name: string; count: number; revenueUsdCents: number }[];
+  /** Last 30 days service revenue by category (USD cents) for operational mix chart */
+  serviceCategoryMixLast30: { category: string; revenueUsdCents: number }[];
 };
 
 export type LowStockAlertRow = {
@@ -585,21 +597,27 @@ export type TodayRevenueSnapshot = {
 };
 
 export async function fetchTodayRevenueSnapshot(supabase: SupabaseClient): Promise<TodayRevenueSnapshot> {
-  const dayKey = getMonroviaDayKey();
-  const start = `${dayKey}T00:00:00.000Z`;
-  const end = `${dayKey}T23:59:59.999Z`;
+  return fetchCashActivityForBusinessDate(supabase, getMonroviaDayKey());
+}
+
+/** Native USD/LRD recorded sales for draw reconciliation (Monrovia business date). */
+export async function fetchCashActivityForBusinessDate(
+  supabase: SupabaseClient,
+  dayKey: string,
+): Promise<TodayRevenueSnapshot> {
+  const { startIso, endIso } = monroviaDayUtcWindow(dayKey);
 
   const [{ data: sales }, { data: services }] = await Promise.all([
     supabase
       .from("sales")
       .select("qty,unit_price_cents,currency,revenue_usd_equiv_cents")
-      .gte("sold_at", start)
-      .lte("sold_at", end),
+      .gte("sold_at", startIso)
+      .lte("sold_at", endIso),
     supabase
       .from("service_logs")
       .select("revenue_cents,currency,revenue_usd_equiv_cents")
-      .gte("sold_at", start)
-      .lte("sold_at", end),
+      .gte("sold_at", startIso)
+      .lte("sold_at", endIso),
   ]);
 
   const retailNative: CurrencyTotals = { USD: 0, LRD: 0 };
@@ -747,6 +765,7 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
   );
 
   const prodAgg: Record<string, { qty: number; revenueUsdCents: number }> = {};
+  const prodAggQtyLast30: Record<string, { qty: number; revenueUsdCents: number }> = {};
   for (const s of sales) {
     const nm = nameById[s.inventory_item_id] ?? "Product";
     const rev =
@@ -754,12 +773,24 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
     if (!prodAgg[nm]) prodAgg[nm] = { qty: 0, revenueUsdCents: 0 };
     prodAgg[nm].qty += s.qty;
     prodAgg[nm].revenueUsdCents += rev;
+    const t = new Date(s.sold_at).getTime();
+    if (t >= monthAgo) {
+      if (!prodAggQtyLast30[nm]) prodAggQtyLast30[nm] = { qty: 0, revenueUsdCents: 0 };
+      prodAggQtyLast30[nm].qty += s.qty;
+      prodAggQtyLast30[nm].revenueUsdCents += rev;
+    }
   }
   const topProducts = Object.entries(prodAgg)
     .map(([name, v]) => ({ name, ...v }))
     .sort((a, b) => b.revenueUsdCents - a.revenueUsdCents)
     .slice(0, 8);
 
+  const topProductsByQty = Object.entries(prodAggQtyLast30)
+    .map(([name, v]) => ({ name, ...v }))
+    .sort((a, b) => b.qty - a.qty)
+    .slice(0, 8);
+
+  const svcMixLast30: Record<string, number> = {};
   const svcAgg: Record<string, { count: number; revenueUsdCents: number }> = {};
   for (const s of services) {
     const label = (s.service_category ?? "").trim() || s.service_name;
@@ -767,11 +798,20 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
     if (!svcAgg[label]) svcAgg[label] = { count: 0, revenueUsdCents: 0 };
     svcAgg[label].count += 1;
     svcAgg[label].revenueUsdCents += rev;
+    const t = new Date(s.sold_at).getTime();
+    if (t >= monthAgo) {
+      const cat = (s.service_category ?? "").trim() || "Uncategorized";
+      svcMixLast30[cat] = (svcMixLast30[cat] ?? 0) + rev;
+    }
   }
   const topServices = Object.entries(svcAgg)
     .map(([name, v]) => ({ name, ...v }))
     .sort((a, b) => b.revenueUsdCents - a.revenueUsdCents)
     .slice(0, 8);
+
+  const serviceCategoryMixLast30 = Object.entries(svcMixLast30)
+    .map(([category, revenueUsdCents]) => ({ category, revenueUsdCents }))
+    .sort((a, b) => b.revenueUsdCents - a.revenueUsdCents);
 
   return {
     dailyUsd,
@@ -785,7 +825,9 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
     monthNative,
     ytdNative,
     topProducts,
+    topProductsByQty,
     topServices,
+    serviceCategoryMixLast30,
   };
 }
 
@@ -865,4 +907,249 @@ export async function fetchTopMarginProducts(supabase: SupabaseClient, take = 5)
     .filter((x): x is TopMarginProduct => x != null)
     .sort((a, b) => b.marginPct - a.marginPct);
   return ranked.slice(0, take);
+}
+
+export type OperationalSettingsRow = {
+  id: number;
+  ngn_per_usd: number | string | null;
+  lrd_per_usd: number | string | null;
+  low_stock_threshold_default: number | string | null;
+  margin_warning_pct: number | string | null;
+  updated_at: string;
+  updated_by: string | null;
+};
+
+export async function fetchOperationalSettings(supabase: SupabaseClient): Promise<OperationalSettingsRow | null> {
+  const { data, error } = await supabase.from("operational_settings").select("*").eq("id", 1).maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as OperationalSettingsRow | null) ?? null;
+}
+
+export type DailyCashReconciliationRow = {
+  id: string;
+  business_date: string;
+  expected_usd_cents: number;
+  actual_usd_cents: number | null;
+  variance_usd_cents: number;
+  expected_lrd_cents: number;
+  actual_lrd_cents: number | null;
+  variance_lrd_cents: number;
+  notes: string | null;
+  reconciled_at: string;
+  reconciled_by: string | null;
+};
+
+export async function fetchDailyCashReconciliationForDate(
+  supabase: SupabaseClient,
+  dayKey: string,
+): Promise<DailyCashReconciliationRow | null> {
+  const { data, error } = await supabase
+    .from("daily_cash_reconciliations")
+    .select(
+      "id,business_date,expected_usd_cents,actual_usd_cents,variance_usd_cents,expected_lrd_cents,actual_lrd_cents,variance_lrd_cents,notes,reconciled_at,reconciled_by",
+    )
+    .eq("business_date", dayKey)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as DailyCashReconciliationRow | null) ?? null;
+}
+
+export type InventoryMovementType =
+  | "purchase"
+  | "retail_sale"
+  | "service_usage"
+  | "manual_adjustment"
+  | "correction"
+  | "damaged"
+  | "expired"
+  | "restock"
+  | "opening_balance";
+
+export type InventoryMovementRow = {
+  id: string;
+  inventory_item_id: string;
+  movement_type: InventoryMovementType;
+  quantity_before: number;
+  quantity_change: number;
+  quantity_after: number;
+  unit_cost_basis_cents: number;
+  fx_snapshot: Record<string, unknown>;
+  reference_type: string | null;
+  reference_id: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export async function fetchInventoryMovementsForItem(
+  supabase: SupabaseClient,
+  inventoryItemId: string,
+  limit = 50,
+): Promise<InventoryMovementRow[]> {
+  const { data, error } = await supabase
+    .from("inventory_movements")
+    .select(
+      "id,inventory_item_id,movement_type,quantity_before,quantity_change,quantity_after,unit_cost_basis_cents,fx_snapshot,reference_type,reference_id,notes,created_by,created_at",
+    )
+    .eq("inventory_item_id", inventoryItemId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as InventoryMovementRow[];
+}
+
+export type InventoryCorrectionLogRow = {
+  id: string;
+  inventory_item_id: string;
+  corrected_by: string | null;
+  created_at: string;
+  audit_reason: string;
+  movement_type: string | null;
+  quantity_before: number | null;
+  quantity_after: number | null;
+  avg_unit_cost_cents_before: number | null;
+  avg_unit_cost_cents_after: number | null;
+  sell_price_usd_cents_before: number | null;
+  sell_price_usd_cents_after: number | null;
+  weighted_avg_landed_usd_cents_before: number | null;
+  weighted_avg_landed_usd_cents_after: number | null;
+  active_before: boolean | null;
+  active_after: boolean | null;
+  archived_before: boolean | null;
+  archived_after: boolean | null;
+};
+
+export async function fetchInventoryCorrectionLog(
+  supabase: SupabaseClient,
+  inventoryItemId: string,
+  limit = 25,
+): Promise<InventoryCorrectionLogRow[]> {
+  const { data, error } = await supabase
+    .from("inventory_correction_log")
+    .select(
+      "id,inventory_item_id,corrected_by,created_at,audit_reason,movement_type,quantity_before,quantity_after,avg_unit_cost_cents_before,avg_unit_cost_cents_after,sell_price_usd_cents_before,sell_price_usd_cents_after,weighted_avg_landed_usd_cents_before,weighted_avg_landed_usd_cents_after,active_before,active_after,archived_before,archived_after",
+    )
+    .eq("inventory_item_id", inventoryItemId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as InventoryCorrectionLogRow[];
+}
+
+export type LastMovementSummary = {
+  movement_type: InventoryMovementType;
+  created_at: string;
+  quantity_change: number;
+};
+
+export async function fetchLastMovementByItemIds(
+  supabase: SupabaseClient,
+  itemIds: string[],
+): Promise<Record<string, LastMovementSummary>> {
+  if (!itemIds.length) return {};
+  const { data, error } = await supabase
+    .from("inventory_movements")
+    .select("inventory_item_id,movement_type,quantity_change,created_at")
+    .in("inventory_item_id", itemIds)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  const out: Record<string, LastMovementSummary> = {};
+  for (const raw of data ?? []) {
+    const row = raw as {
+      inventory_item_id: string;
+      movement_type: InventoryMovementType;
+      quantity_change: number | string;
+      created_at: string;
+    };
+    if (out[row.inventory_item_id]) continue;
+    out[row.inventory_item_id] = {
+      movement_type: row.movement_type,
+      created_at: row.created_at,
+      quantity_change: Number(row.quantity_change),
+    };
+  }
+  return out;
+}
+
+export type DashboardTrustSignals = {
+  businessDate: string;
+  reconciliationLabel: "reconciled" | "variance" | "pending";
+  reconciliationRow: DailyCashReconciliationRow | null;
+  lowStockCount: number;
+  negativeMarginSkuCount: number;
+  tightMarginSkuCount: number;
+  marginWarningPct: number;
+  inventoryValuationUpdatedAt: string | null;
+  lastInventoryMovementAt: string | null;
+  lastRestockMovementAt: string | null;
+};
+
+function reconciliationStatusFromRow(row: DailyCashReconciliationRow | null): DashboardTrustSignals["reconciliationLabel"] {
+  if (!row) return "pending";
+  const hasUsd = row.actual_usd_cents != null;
+  const hasLrd = row.actual_lrd_cents != null;
+  if (!hasUsd || !hasLrd) return "pending";
+  if (Math.abs(row.variance_usd_cents) <= 1 && Math.abs(row.variance_lrd_cents) <= 1) return "reconciled";
+  return "variance";
+}
+
+export async function fetchDashboardTrustSignals(supabase: SupabaseClient): Promise<DashboardTrustSignals> {
+  const businessDate = getMonroviaDayKey();
+  const [settings, reconRow, statusSummary, lastInvUpRes, lastMovRes, lastRestockRes, items] = await Promise.all([
+    fetchOperationalSettings(supabase),
+    fetchDailyCashReconciliationForDate(supabase, businessDate),
+    fetchInventoryStatusSummary(supabase),
+    supabase
+      .from("inventory_items")
+      .select("updated_at")
+      .is("deleted_at", null)
+      .eq("active", true)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase.from("inventory_movements").select("created_at").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase
+      .from("inventory_movements")
+      .select("created_at")
+      .in("movement_type", ["purchase", "restock"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    fetchInventoryProducts(supabase, {}),
+  ]);
+
+  if (lastInvUpRes.error) throw new Error(lastInvUpRes.error.message);
+  if (lastMovRes.error) throw new Error(lastMovRes.error.message);
+  if (lastRestockRes.error) throw new Error(lastRestockRes.error.message);
+
+  const warnPctRaw = settings?.margin_warning_pct;
+  const marginWarningPct =
+    warnPctRaw != null && Number.isFinite(Number(warnPctRaw)) && Number(warnPctRaw) >= 0 ? Number(warnPctRaw) : 12;
+
+  let negativeMarginSkuCount = 0;
+  let tightMarginSkuCount = 0;
+  for (const it of items) {
+    if (!it.active || it.deleted_at) continue;
+    const m = unitGrossMarginPct(it);
+    if (m == null) continue;
+    if (m < 0) negativeMarginSkuCount++;
+    else if (m < marginWarningPct) tightMarginSkuCount++;
+  }
+
+  const lu = lastInvUpRes.data as { updated_at: string } | null;
+  const lm = lastMovRes.data as { created_at: string } | null;
+  const lr = lastRestockRes.data as { created_at: string } | null;
+
+  return {
+    businessDate,
+    reconciliationLabel: reconciliationStatusFromRow(reconRow),
+    reconciliationRow: reconRow,
+    lowStockCount: statusSummary.low_stock,
+    negativeMarginSkuCount,
+    tightMarginSkuCount,
+    marginWarningPct,
+    inventoryValuationUpdatedAt: lu?.updated_at ?? null,
+    lastInventoryMovementAt: lm?.created_at ?? null,
+    lastRestockMovementAt: lr?.created_at ?? null,
+  };
 }

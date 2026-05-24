@@ -87,7 +87,7 @@ export function SalonPurchaseForm({
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block text-xs text-white/55">
           FX (NGN per 1 USD)
-          <input name="fx_ngn_usd" type="number" step="0.01" min="0" className={field} placeholder="e.g. 1550" />
+          <input name="fx_ngn_usd" type="number" step="0.01" min="0" className={field} placeholder="e.g. 1385" />
         </label>
         <label className="block text-xs text-white/55">
           Landed / shipping (USD total)

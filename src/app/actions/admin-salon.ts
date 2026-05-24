@@ -4,7 +4,13 @@ import type { AdminContext } from "@/lib/auth/admin-context";
 import { getAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 import { normalizeCurrency, parseMoneyToCents, parseQty, type SalonCurrency } from "@/lib/admin/salon-format";
 import { effectiveUnitCostUsdCents, lineRevenueUsdEquivCents } from "@/lib/admin/salon-finance";
-import { fetchInventoryItem } from "@/lib/admin/salon-queries";
+import { fetchCashActivityForBusinessDate, fetchInventoryItem } from "@/lib/admin/salon-queries";
+import {
+  buildAdminCorrectionRpcPayload,
+  detectInventoryMaterialChanges,
+  type InventoryMovementType,
+} from "@/lib/admin/inventory-admin-correction";
+import { inventoryCostingFromFormMajors, unitGrossProfitUsdCents } from "@/lib/admin/pricing-engine";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
@@ -26,6 +32,8 @@ function revalidateSalon() {
   revalidatePath("/admin/services/new");
   revalidatePath("/admin/suppliers");
   revalidatePath("/admin/sales-log");
+  revalidatePath("/admin/reconcile");
+  revalidatePath("/admin/settings");
 }
 
 function staffForbidden(): SalonActionResult {
@@ -185,11 +193,16 @@ export async function updateInventoryItemAction(input: {
   sellingPrice?: string | null;
   sellingPriceCurrency?: SalonCurrency;
   active: boolean;
+  archived?: boolean;
+  isAddon?: boolean;
   fxNgnPerUsd?: string | null;
   landedUsd?: string | null;
   storePriceUsd?: string | null;
   sellPriceUsd?: string | null;
   sellPriceLd?: string | null;
+  wacUsdOverride?: string | null;
+  movementType?: InventoryMovementType;
+  auditReason?: string | null;
 }): Promise<SalonActionResult> {
   if (!isUuid(input.id)) return { ok: false, error: "invalid_id" };
   const ctx = await getAdminContext();
@@ -221,35 +234,80 @@ export async function updateInventoryItemAction(input: {
   const defaultCur = sellUsd != null ? ("USD" as SalonCurrency) : pc;
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase
-    .from("inventory_items")
-    .update({
-      product_name: productName,
-      name: productName,
-      sku: input.sku?.trim() || null,
-      unit: (input.unit?.trim() || "each").slice(0, 32),
-      supplier_id: input.supplierId && isUuid(input.supplierId) ? input.supplierId : null,
-      category: input.category?.trim() || null,
-      notes: input.notes?.trim() || null,
-      reorder_level: rl,
-      reorder_point: rl,
-      low_stock_threshold: lt,
-      quantity_on_hand: qoh,
-      avg_unit_cost_cents: cost,
-      cost_currency: cc,
-      default_unit_price_cents: defaultUnit ?? defPrice,
-      default_price_currency: defaultUnit != null ? defaultCur : pc,
-      fx_ngn_per_usd: fx,
-      landed_usd_cents_per_unit: landed ?? 0,
-      store_price_usd_cents: storeUsd,
-      sell_price_usd_cents: sellUsd,
-      sell_price_lrd_cents: sellLd,
-      active: input.active,
-    })
-    .eq("id", input.id);
+  const existing = await fetchInventoryItem(supabase, input.id);
+  if (!existing) return { ok: false, error: "not_found" };
 
-  if (error) return { ok: false, error: error.message };
+  const postedWac =
+    existing.weighted_avg_landed_usd_cents != null && existing.weighted_avg_landed_usd_cents > 0
+      ? existing.weighted_avg_landed_usd_cents
+      : null;
+  const wacOverride =
+    input.wacUsdOverride != null && input.wacUsdOverride !== "" ? parseMoneyToCents(input.wacUsdOverride) : null;
+  if (wacOverride != null && wacOverride < 0) return { ok: false, error: "invalid_wac" };
+
+  const draftRow = inventoryCostingFromFormMajors({
+    avgUnitCostMajor: (cost ?? 0) / 100,
+    costCurrency: cc,
+    fxNgnPerUsdText: input.fxNgnPerUsd ?? "",
+    landedUsdMajor: (landed ?? 0) / 100,
+    sellUsdMajor: (sellUsd ?? 0) / 100,
+    sellLrdMajor: (sellLd ?? 0) / 100,
+    storeUsdMajor: (storeUsd ?? 0) / 100,
+    postedWacUsdCents: wacOverride ?? postedWac,
+  });
+  const gpPre = unitGrossProfitUsdCents(draftRow);
+  const auditReason = input.auditReason?.trim() ?? "";
+  const movementType: InventoryMovementType = input.movementType ?? "correction";
+  const archived = input.archived ?? existing.deleted_at != null;
+  const isAddon = input.isAddon ?? existing.is_addon ?? false;
+
+  const correctionInput = {
+    productName,
+    sku: input.sku?.trim() || null,
+    unit: (input.unit?.trim() || "each").slice(0, 32),
+    supplierId: input.supplierId && isUuid(input.supplierId) ? input.supplierId : null,
+    category: input.category?.trim() || null,
+    notes: input.notes?.trim() || null,
+    reorderLevel: rl,
+    lowStockThreshold: lt,
+    quantityOnHand: qoh,
+    avgUnitCostCents: cost,
+    costCurrency: cc,
+    defaultUnitPriceCents: defaultUnit ?? defPrice,
+    defaultPriceCurrency: defaultUnit != null ? defaultCur : pc,
+    fxNgnPerUsd: fx,
+    landedUsdCentsPerUnit: landed ?? 0,
+    storePriceUsdCents: storeUsd,
+    sellPriceUsdCents: sellUsd,
+    sellPriceLrdCents: sellLd,
+    weightedAvgLandedUsdCents: wacOverride ?? postedWac ?? existing.weighted_avg_landed_usd_cents ?? 0,
+    active: input.active,
+    archived,
+    isAddon,
+    auditReason,
+    movementType,
+  };
+
+  const changes = detectInventoryMaterialChanges(existing, correctionInput);
+  if (changes.any && auditReason.length < 3) {
+    return { ok: false, error: "audit_reason_required" };
+  }
+  if (gpPre != null && gpPre < 0 && auditReason.length < 3) {
+    return { ok: false, error: "audit_reason_required_below_cost" };
+  }
+
+  const payload = buildAdminCorrectionRpcPayload(input.id, correctionInput);
+  const { error } = await supabase.rpc("admin_correct_inventory_item", { p_payload: payload });
+
+  if (error) {
+    const msg = error.message ?? "update_failed";
+    if (msg.includes("audit_reason_required")) return { ok: false, error: "audit_reason_required" };
+    if (msg.includes("forbidden") || msg.includes("42501")) return { ok: false, error: "forbidden_staff_role" };
+    return { ok: false, error: msg };
+  }
+
   revalidateSalon();
+  revalidatePath(`/admin/inventory/${input.id}`);
   return { ok: true };
 }
 
@@ -561,6 +619,109 @@ export async function receivePurchaseAction(input: { purchaseId: string }): Prom
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.from("purchases").update({ status: "received" }).eq("id", input.purchaseId);
+  if (error) return { ok: false, error: error.message };
+  revalidateSalon();
+  return { ok: true };
+}
+
+function parseOptionalMajorRate(raw: string | undefined | null): number | null {
+  if (raw == null || raw.trim() === "") return null;
+  const n = Number(String(raw).replace(/,/g, "").trim());
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+export async function saveOperationalSettingsAction(input: {
+  ngnPerUsd?: string | null;
+  lrdPerUsd?: string | null;
+  lowStockThresholdDefault?: string | null;
+  marginWarningPct?: string | null;
+}): Promise<SalonActionResult> {
+  const ctx = await getAdminContext();
+  const deny = requireNotStaff(ctx);
+  if (deny) return deny;
+
+  const ngn = parseOptionalMajorRate(input.ngnPerUsd);
+  const lrd = parseOptionalMajorRate(input.lrdPerUsd);
+  if (input.ngnPerUsd?.trim() && ngn == null) return { ok: false, error: "invalid_ngn_per_usd" };
+  if (input.lrdPerUsd?.trim() && lrd == null) return { ok: false, error: "invalid_lrd_per_usd" };
+
+  let lowStock: number | null = null;
+  if (input.lowStockThresholdDefault != null && input.lowStockThresholdDefault.trim() !== "") {
+    const n = Number(String(input.lowStockThresholdDefault).replace(/,/g, "").trim());
+    if (!Number.isFinite(n) || n < 0) return { ok: false, error: "invalid_low_stock_default" };
+    lowStock = n;
+  }
+
+  let marginWarn: number | null = null;
+  if (input.marginWarningPct != null && input.marginWarningPct.trim() !== "") {
+    const n = Number(String(input.marginWarningPct).replace(/,/g, "").trim());
+    if (!Number.isFinite(n) || n < 0 || n > 100) return { ok: false, error: "invalid_margin_warning" };
+    marginWarn = n;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { error } = await supabase
+    .from("operational_settings")
+    .update({
+      ngn_per_usd: ngn,
+      lrd_per_usd: lrd,
+      low_stock_threshold_default: lowStock,
+      margin_warning_pct: marginWarn,
+      updated_at: new Date().toISOString(),
+      updated_by: user?.id ?? null,
+    })
+    .eq("id", 1);
+
+  if (error) return { ok: false, error: error.message };
+  revalidateSalon();
+  return { ok: true };
+}
+
+export async function saveDailyCashReconciliationAction(input: {
+  businessDate: string;
+  actualUsd: string;
+  actualLrd: string;
+  notes?: string | null;
+}): Promise<SalonActionResult> {
+  const ctx = await getAdminContext();
+  const deny = requireNotStaff(ctx);
+  if (deny) return deny;
+
+  const day = input.businessDate?.trim() ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: "invalid_date" };
+
+  const actualUsd = parseMoneyToCents(input.actualUsd);
+  const actualLrd = parseMoneyToCents(input.actualLrd);
+  if (actualUsd == null || actualLrd == null) return { ok: false, error: "invalid_actual_amounts" };
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const snap = await fetchCashActivityForBusinessDate(supabase, day);
+  const expectedUsd = snap.retailNative.USD + snap.serviceNative.USD;
+  const expectedLrd = snap.retailNative.LRD + snap.serviceNative.LRD;
+
+  const { error } = await supabase.from("daily_cash_reconciliations").upsert(
+    {
+      business_date: day,
+      expected_usd_cents: expectedUsd,
+      expected_lrd_cents: expectedLrd,
+      actual_usd_cents: actualUsd,
+      actual_lrd_cents: actualLrd,
+      notes: input.notes?.trim() || null,
+      reconciled_by: user?.id ?? null,
+      reconciled_at: new Date().toISOString(),
+    },
+    { onConflict: "business_date" },
+  );
+
   if (error) return { ok: false, error: error.message };
   revalidateSalon();
   return { ok: true };

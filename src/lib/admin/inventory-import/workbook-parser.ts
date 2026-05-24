@@ -1,0 +1,196 @@
+import * as XLSX from "xlsx";
+import {
+  cellString,
+  isHeaderRow,
+  isSubtotalOrTotalRow,
+  normalizeSheetName,
+} from "@/lib/admin/inventory-import/parse-utils";
+import {
+  detectProfileForSheet,
+  isEquipmentLumpHeader,
+  parseRowWithProfile,
+} from "@/lib/admin/inventory-import/profiles";
+import type {
+  InventoryImportCategorySummary,
+  InventoryImportPreviewReport,
+  InventoryImportValidationStatus,
+  ParsedInventoryImportRow,
+} from "@/lib/admin/inventory-import/types";
+import { EXPECTED_IMPORT_CATEGORIES } from "@/lib/admin/inventory-import/types";
+import {
+  getOperationalFx,
+  type OperationalFxRates,
+} from "@/lib/admin/pricing-engine";
+
+const MULTI_BLOCK_SHEETS = new Set(["Hair & Salon Equipment", "Microblading"]);
+
+function sheetToCategory(normalizedSheetName: string): string {
+  return normalizedSheetName;
+}
+
+function rowToCells(row: unknown[]): string[] {
+  return row.map((c) => cellString(c));
+}
+
+function countByStatus(rows: ParsedInventoryImportRow[], status: InventoryImportValidationStatus): number {
+  return rows.filter((r) => r.validationStatus === status).length;
+}
+
+function buildCategorySummaries(rows: ParsedInventoryImportRow[]): InventoryImportCategorySummary[] {
+  const byCat = new Map<string, ParsedInventoryImportRow[]>();
+  for (const r of rows) {
+    const list = byCat.get(r.category) ?? [];
+    list.push(r);
+    byCat.set(r.category, list);
+  }
+  return [...byCat.entries()]
+    .map(([category, catRows]) => ({
+      category,
+      totalRows: catRows.length,
+      ok: countByStatus(catRows, "ok"),
+      warning: countByStatus(catRows, "warning"),
+      error: countByStatus(catRows, "error"),
+      needsReview: countByStatus(catRows, "needs_review"),
+      skipped: catRows.filter((r) => r.skipped).length,
+      importable: catRows.filter((r) => !r.skipped && r.validationStatus !== "error" && r.validationStatus !== "needs_review").length,
+    }))
+    .sort((a, b) => a.category.localeCompare(b.category));
+}
+
+function applyDuplicateWarnings(rows: ParsedInventoryImportRow[]): number {
+  const seen = new Map<string, ParsedInventoryImportRow[]>();
+  for (const r of rows) {
+    if (!r.duplicateKey) continue;
+    const list = seen.get(r.duplicateKey) ?? [];
+    list.push(r);
+    seen.set(r.duplicateKey, list);
+  }
+  let warnings = 0;
+  for (const [, group] of seen) {
+    if (group.length < 2) continue;
+    warnings += group.length;
+    for (const r of group) {
+      if (r.validationStatus === "ok") r.validationStatus = "warning";
+      else if (r.validationStatus === "needs_review") {
+        /* keep needs_review */
+      }
+      const msg = `Duplicate product name in category (${group.length} rows): ${group.map((x) => `row ${x.sourceRow}`).join(", ")}`;
+      if (!r.validationMessages.includes(msg)) r.validationMessages.push(msg);
+    }
+  }
+  return warnings;
+}
+
+function parseSheetRows(
+  sheetName: string,
+  matrix: unknown[][],
+  fx: OperationalFxRates,
+): ParsedInventoryImportRow[] {
+  const category = sheetToCategory(sheetName);
+  let profile = detectProfileForSheet(sheetName);
+  let sectionNote: string | null = null;
+  const out: ParsedInventoryImportRow[] = [];
+
+  for (let i = 0; i < matrix.length; i++) {
+    const rowIndex = i + 1;
+    const row = matrix[i] ?? [];
+    const cells = rowToCells(row);
+
+    if (!cells.some((c) => c.length > 0)) continue;
+    if (isSubtotalOrTotalRow(cells)) continue;
+
+    if (isHeaderRow(cells)) {
+      if (MULTI_BLOCK_SHEETS.has(sheetName) && isEquipmentLumpHeader(cells)) {
+        profile = "equipment_lump";
+        sectionNote = sheetName === "Hair & Salon Equipment" ? "Pedicure & Manicure equipment" : "Industrial equipment";
+      } else if (!isEquipmentLumpHeader(cells)) {
+        profile = detectProfileForSheet(sheetName);
+      }
+      continue;
+    }
+
+    // Skip SN-only or label rows without product name
+    const nameIdx = profile === "carton" ? 0 : profile === "hair_products_mixed" ? 1 : 1;
+    const productName = cells[nameIdx]?.trim() ?? "";
+    if (!productName) continue;
+    if (/^grand\s*total/i.test(productName)) continue;
+
+    const parsed = parseRowWithProfile(profile, row, {
+      sheet: sheetName,
+      category,
+      rowIndex,
+      fx,
+      sectionNote,
+    });
+    if (parsed) out.push(parsed);
+  }
+
+  return out;
+}
+
+/**
+ * Phase 1 — parse workbook bytes into preview report. NO database writes.
+ */
+export function parseInventoryWorkbookBuffer(
+  buffer: ArrayBuffer,
+  filename: string,
+  fx: OperationalFxRates = getOperationalFx(),
+): InventoryImportPreviewReport {
+  const wb = XLSX.read(buffer, { type: "array", cellDates: false });
+  const normalizedInFile = new Map<string, string>();
+  for (const rawName of wb.SheetNames) {
+    normalizedInFile.set(normalizeSheetName(rawName), rawName);
+  }
+
+  const unknownSheets: string[] = [];
+  const missingExpectedSheets: string[] = [];
+  const allRows: ParsedInventoryImportRow[] = [];
+
+  for (const rawName of wb.SheetNames) {
+    const norm = normalizeSheetName(rawName);
+    const expected = EXPECTED_IMPORT_CATEGORIES.some((c) => c === norm);
+    if (!expected) unknownSheets.push(rawName);
+  }
+
+  for (const expected of EXPECTED_IMPORT_CATEGORIES) {
+    if (!normalizedInFile.has(expected)) missingExpectedSheets.push(expected);
+  }
+
+  for (const expected of EXPECTED_IMPORT_CATEGORIES) {
+    const rawName = normalizedInFile.get(expected);
+    if (!rawName) continue;
+    const ws = wb.Sheets[rawName];
+    if (!ws) continue;
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, raw: true }) as unknown[][];
+    allRows.push(...parseSheetRows(expected, matrix, fx));
+  }
+
+  const duplicateNameWarnings = applyDuplicateWarnings(allRows);
+  const categorySummaries = buildCategorySummaries(allRows);
+
+  const skipped = allRows.filter((r) => r.skipped).length;
+  const importable = allRows.filter(
+    (r) => !r.skipped && (r.validationStatus === "ok" || r.validationStatus === "warning"),
+  ).length;
+
+  return {
+    filename,
+    parsedAt: new Date().toISOString(),
+    fxNgnPerUsd: fx.ngnPerUsd,
+    fxLrdPerUsd: fx.lrdPerUsd,
+    rows: allRows,
+    categorySummaries,
+    summary: {
+      totalRows: allRows.length,
+      ok: countByStatus(allRows, "ok"),
+      warning: countByStatus(allRows, "warning"),
+      error: countByStatus(allRows, "error"),
+      needsReview: countByStatus(allRows, "needs_review"),
+      skipped,
+      importable,
+      duplicateNameWarnings,
+      unknownSheets,
+      missingExpectedSheets,
+    },
+  };
+}

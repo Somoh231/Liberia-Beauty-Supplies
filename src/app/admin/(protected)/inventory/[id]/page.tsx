@@ -24,6 +24,7 @@ import {
   unitGrossProfitUsdCents,
 } from "@/lib/admin/pricing-engine";
 import { cn } from "@/lib/utils";
+import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 
 export const dynamic = "force-dynamic";
@@ -47,9 +48,14 @@ function movementTypeLabel(t: InventoryMovementRow["movement_type"]): string {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  const supabase = await createSupabaseServerClient();
-  const row = await fetchInventoryItem(supabase, id);
-  return { title: row?.product_name ?? `Product ${id.slice(0, 8)}…` };
+  try {
+    const supabase = await createSupabaseServerClient();
+    const row = await fetchInventoryItem(supabase, id);
+    return { title: row?.product_name ?? `Product ${id.slice(0, 8)}…` };
+  } catch (e) {
+    logSalonAdminSupabaseFailure("metadata:admin/inventory/[id]", e, { inventoryItemId: id });
+    return { title: `Product ${id.slice(0, 8)}…` };
+  }
 }
 
 export default async function AdminInventoryDetailPage({ params }: Props) {
@@ -57,14 +63,29 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
   const staff = isSalonStaffRole(ctx.roleSlug);
   const { id } = await params;
   const supabase = await createSupabaseServerClient();
-  const [item, suppliers, sales, movements, corrections, settings] = await Promise.all([
-    fetchInventoryItem(supabase, id),
-    fetchSuppliers(supabase),
-    fetchSalesForItem(supabase, id, 25),
-    fetchInventoryMovementsForItem(supabase, id, 40),
-    fetchInventoryCorrectionLog(supabase, id, 15),
-    fetchOperationalSettings(supabase),
-  ]);
+  let item;
+  let suppliers;
+  let sales;
+  let movements;
+  let corrections;
+  let settings;
+  try {
+    [item, suppliers, sales, movements, corrections, settings] = await Promise.all([
+      fetchInventoryItem(supabase, id),
+      fetchSuppliers(supabase),
+      fetchSalesForItem(supabase, id, 25),
+      fetchInventoryMovementsForItem(supabase, id, 40),
+      fetchInventoryCorrectionLog(supabase, id, 15),
+      fetchOperationalSettings(supabase),
+    ]);
+  } catch (err) {
+    logSalonAdminSupabaseFailure("page:GET /admin/inventory/[id]", err, {
+      userId: ctx.user.id,
+      role: ctx.salonRole,
+      inventoryItemId: id,
+    });
+    throw err;
+  }
 
   if (!item) notFound();
 

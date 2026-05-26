@@ -4,6 +4,7 @@ import { SalonSupplierCreateForm } from "@/components/admin/salon-supplier-creat
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchAllSuppliersAdmin, fetchSupplierLastRestockMap } from "@/lib/admin/salon-queries";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
+import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
 
 export const metadata: Metadata = { title: "Suppliers" };
 export const dynamic = "force-dynamic";
@@ -12,7 +13,17 @@ export default async function AdminSuppliersPage() {
   const ctx = await requireAdminContext();
   const staff = isSalonStaffRole(ctx.roleSlug);
   const supabase = await createSupabaseServerClient();
-  const [rows, restock] = await Promise.all([fetchAllSuppliersAdmin(supabase), fetchSupplierLastRestockMap(supabase)]);
+  let rows;
+  let restock: Record<string, string | null>;
+  try {
+    [rows, restock] = await Promise.all([fetchAllSuppliersAdmin(supabase), fetchSupplierLastRestockMap(supabase)]);
+  } catch (err) {
+    logSalonAdminSupabaseFailure("page:GET /admin/suppliers", err, {
+      userId: ctx.user.id,
+      role: ctx.salonRole,
+    });
+    throw err;
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 pb-10">

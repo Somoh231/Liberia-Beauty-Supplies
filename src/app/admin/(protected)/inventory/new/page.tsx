@@ -3,6 +3,7 @@ import { SalonInventoryNewForm } from "@/components/admin/salon-inventory-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchOperationalSettings, fetchSuppliers } from "@/lib/admin/salon-queries";
 import { formatOperationalFxSummaryLineFromRates, resolveOperationalFxFromSettings } from "@/lib/admin/pricing-engine";
+import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
 import { isSalonStaffRole, requireAdminContext } from "@/lib/auth/admin-context";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -15,7 +16,17 @@ export default async function AdminInventoryNewPage() {
   if (isSalonStaffRole(ctx.roleSlug)) redirect("/admin/inventory");
 
   const supabase = await createSupabaseServerClient();
-  const [suppliers, settings] = await Promise.all([fetchSuppliers(supabase), fetchOperationalSettings(supabase)]);
+  let suppliers;
+  let settings;
+  try {
+    [suppliers, settings] = await Promise.all([fetchSuppliers(supabase), fetchOperationalSettings(supabase)]);
+  } catch (err) {
+    logSalonAdminSupabaseFailure("page:GET /admin/inventory/new", err, {
+      userId: ctx.user.id,
+      role: ctx.salonRole,
+    });
+    throw err;
+  }
   const fxLine = formatOperationalFxSummaryLineFromRates(resolveOperationalFxFromSettings(settings));
 
   return (

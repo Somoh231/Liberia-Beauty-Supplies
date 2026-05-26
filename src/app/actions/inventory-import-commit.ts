@@ -9,6 +9,7 @@ import type { InventoryImportPreviewReport } from "@/lib/admin/inventory-import/
 import { getAdminContext } from "@/lib/auth/admin-context";
 import { requireManagerOrAbove } from "@/lib/auth/admin-guards";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
 import { revalidatePath } from "next/cache";
 
 export type InventoryImportCommitResult =
@@ -66,7 +67,15 @@ export async function commitInventoryImportAction(input: {
       .select("unresolved_rows")
       .eq("id", input.parentBatchId)
       .maybeSingle();
-    if (parentErr || !parent) return { ok: false, error: "batch_not_found" };
+    if (parentErr || !parent) {
+      logSalonAdminSupabaseFailure("query:inventory_import_batches parent", parentErr ?? new Error("batch row missing"), {
+        userId: ctx!.user.id,
+        role: ctx!.salonRole,
+        parentBatchId: input.parentBatchId,
+        hadParentErr: !!parentErr,
+      });
+      return { ok: false, error: "batch_not_found" };
+    }
 
     const allowed = new Set(
       ((parent.unresolved_rows as { preview_id?: string }[] | null) ?? []).map((r) => r.preview_id).filter(Boolean),
@@ -104,6 +113,10 @@ export async function commitInventoryImportAction(input: {
   });
 
   if (error) {
+    logSalonAdminSupabaseFailure("rpc:commit_inventory_workbook_import", error, {
+      userId: ctx!.user.id,
+      role: ctx!.salonRole,
+    });
     const msg = error.message ?? "import_failed";
     if (msg.includes("forbidden") || msg.includes("42501")) return { ok: false, error: "forbidden" };
     return { ok: false, error: msg };

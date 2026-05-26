@@ -6,6 +6,7 @@ import { parseInventoryWorkbookBuffer } from "@/lib/admin/inventory-import/workb
 import type { InventoryImportPreviewReport } from "@/lib/admin/inventory-import/types";
 import { fetchOperationalSettings } from "@/lib/admin/salon-queries";
 import { resolveOperationalFxFromSettings } from "@/lib/admin/pricing-engine";
+import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type InventoryImportPreviewResult =
@@ -42,7 +43,11 @@ export async function parseInventoryWorkbookPreviewAction(formData: FormData): P
     const supabase = await createSupabaseServerClient();
     const settings = await fetchOperationalSettings(supabase);
     fx = resolveOperationalFxFromSettings(settings);
-  } catch {
+  } catch (e) {
+    logSalonAdminSupabaseFailure("action:parseInventoryWorkbookPreviewAction:operational_settings", e, {
+      userId: ctx!.user.id,
+      role: ctx!.salonRole,
+    });
     /* env fallbacks */
   }
 
@@ -50,6 +55,12 @@ export async function parseInventoryWorkbookPreviewAction(formData: FormData): P
     const report = parseInventoryWorkbookBuffer(buffer, file.name, fx);
     return { ok: true, report };
   } catch (e) {
+    logSalonAdminSupabaseFailure("action:parseInventoryWorkbookPreviewAction:parse", e, {
+      userId: ctx!.user.id,
+      role: ctx!.salonRole,
+      filename: file.name,
+      fileSize: file.size,
+    });
     return { ok: false, error: e instanceof Error ? e.message : "parse_failed" };
   }
 }

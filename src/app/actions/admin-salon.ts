@@ -12,6 +12,7 @@ import {
   type InventoryMovementType,
 } from "@/lib/admin/inventory-admin-correction";
 import { inventoryCostingFromFormMajors, unitGrossProfitUsdCents } from "@/lib/admin/pricing-engine";
+import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
@@ -292,6 +293,11 @@ export async function updateInventoryItemAction(input: {
   const { error } = await supabase.rpc("admin_correct_inventory_item", { p_payload: payload });
 
   if (error) {
+    logSalonAdminSupabaseFailure("rpc:admin_correct_inventory_item", error, {
+      userId: ctx!.user.id,
+      role: ctx!.salonRole,
+      inventoryItemId: input.id,
+    });
     const msg = error.message ?? "update_failed";
     if (msg.includes("audit_reason_required")) return { ok: false, error: "audit_reason_required" };
     if (msg.includes("forbidden") || msg.includes("42501")) return { ok: false, error: "forbidden_staff_role" };
@@ -595,8 +601,21 @@ export async function createPurchaseAction(input: {
   }
 
   if (input.markReceived) {
-    const { error: uErr } = await supabase.from("purchases").update({ status: "received" }).eq("id", purchaseId);
-    if (uErr) return { ok: false, error: uErr.message };
+    const { error: uErr } = await supabase
+      .from("purchases")
+      .update({
+        status: "received",
+        received_at: new Date().toISOString(),
+      })
+      .eq("id", purchaseId);
+    if (uErr) {
+      logSalonAdminSupabaseFailure("action:createPurchaseAction:mark_received", uErr, {
+        userId: ctx!.user.id,
+        role: ctx!.salonRole,
+        purchaseId,
+      });
+      return { ok: false, error: uErr.message };
+    }
   }
 
   revalidateSalon();
@@ -610,8 +629,21 @@ export async function receivePurchaseAction(input: { purchaseId: string }): Prom
   if (deny) return deny;
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("purchases").update({ status: "received" }).eq("id", input.purchaseId);
-  if (error) return { ok: false, error: error.message };
+  const { error } = await supabase
+    .from("purchases")
+    .update({
+      status: "received",
+      received_at: new Date().toISOString(),
+    })
+    .eq("id", input.purchaseId);
+  if (error) {
+    logSalonAdminSupabaseFailure("action:receivePurchaseAction", error, {
+      userId: ctx!.user.id,
+      role: ctx!.salonRole,
+      purchaseId: input.purchaseId,
+    });
+    return { ok: false, error: error.message };
+  }
   revalidateSalon();
   return { ok: true };
 }

@@ -7,6 +7,7 @@ import {
 } from "@/lib/admin/inventory-import/row-overrides";
 import type { InventoryImportPreviewReport } from "@/lib/admin/inventory-import/types";
 import { getAdminContext } from "@/lib/auth/admin-context";
+import { requireManagerOrAbove } from "@/lib/auth/admin-guards";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
@@ -26,8 +27,8 @@ export type InventoryImportCommitResult =
   | { ok: false; error: string };
 
 function requireImportAdmin(ctx: Awaited<ReturnType<typeof getAdminContext>>): string | null {
-  if (!ctx) return "unauthorized";
-  if (!ctx.isManagerOrAbove) return "forbidden";
+  const deny = requireManagerOrAbove(ctx);
+  if (deny && !deny.ok) return deny.error;
   return null;
 }
 

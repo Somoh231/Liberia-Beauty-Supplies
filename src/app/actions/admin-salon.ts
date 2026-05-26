@@ -1,7 +1,8 @@
 "use server";
 
-import type { AdminContext } from "@/lib/auth/admin-context";
-import { getAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
+import { getAdminContext } from "@/lib/auth/admin-context";
+import { requireNotStaff, requireManagerOrAbove } from "@/lib/auth/admin-guards";
+import type { SalonActionResult } from "@/lib/auth/salon-action-result";
 import { normalizeCurrency, parseMoneyToCents, parseQty, type SalonCurrency } from "@/lib/admin/salon-format";
 import { effectiveUnitCostUsdCents, lineRevenueUsdEquivCents } from "@/lib/admin/salon-finance";
 import { fetchCashActivityForBusinessDate, fetchInventoryItem } from "@/lib/admin/salon-queries";
@@ -20,7 +21,7 @@ function isUuid(s: string): boolean {
   return UUID_RE.test(s);
 }
 
-export type SalonActionResult = { ok: true } | { ok: false; error: string };
+export type { SalonActionResult } from "@/lib/auth/salon-action-result";
 
 function revalidateSalon() {
   revalidatePath("/admin");
@@ -34,16 +35,7 @@ function revalidateSalon() {
   revalidatePath("/admin/sales-log");
   revalidatePath("/admin/reconcile");
   revalidatePath("/admin/settings");
-}
-
-function staffForbidden(): SalonActionResult {
-  return { ok: false, error: "forbidden_staff_role" };
-}
-
-function requireNotStaff(ctx: AdminContext | null): SalonActionResult | null {
-  if (!ctx) return { ok: false, error: "unauthorized" };
-  if (isSalonStaffRole(ctx.roleSlug)) return staffForbidden();
-  return null;
+  revalidatePath("/admin/users");
 }
 
 function parseFxNgnPerUsd(raw: string | undefined | null): number | null {
@@ -206,7 +198,7 @@ export async function updateInventoryItemAction(input: {
 }): Promise<SalonActionResult> {
   if (!isUuid(input.id)) return { ok: false, error: "invalid_id" };
   const ctx = await getAdminContext();
-  const deny = requireNotStaff(ctx);
+  const deny = requireManagerOrAbove(ctx);
   if (deny) return deny;
   const productName = input.productName?.trim() ?? "";
   if (productName.length < 2) return { ok: false, error: "invalid_name" };
@@ -638,7 +630,7 @@ export async function saveOperationalSettingsAction(input: {
   marginWarningPct?: string | null;
 }): Promise<SalonActionResult> {
   const ctx = await getAdminContext();
-  const deny = requireNotStaff(ctx);
+  const deny = requireManagerOrAbove(ctx);
   if (deny) return deny;
 
   const ngn = parseOptionalMajorRate(input.ngnPerUsd);
@@ -689,7 +681,7 @@ export async function saveDailyCashReconciliationAction(input: {
   notes?: string | null;
 }): Promise<SalonActionResult> {
   const ctx = await getAdminContext();
-  const deny = requireNotStaff(ctx);
+  const deny = requireManagerOrAbove(ctx);
   if (deny) return deny;
 
   const day = input.businessDate?.trim() ?? "";

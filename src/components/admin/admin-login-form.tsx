@@ -3,6 +3,7 @@
 import type { ConnectionDiagnosis } from "@/lib/env/supabase-connection-diagnosis";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { formatSupabaseAuthFailureMessage, validatePublicSupabaseEnv } from "@/lib/env/supabase-public";
+import { isPortalProfileAllowed } from "@/lib/auth/admin-portal-access";
 import { safeAdminPostLoginPath } from "@/lib/auth/safe-admin-next";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -109,19 +110,32 @@ export function AdminLoginForm() {
           return;
         }
 
-        const { data: ok, error: rpcErr } = await supabase.rpc("can_access_admin_portal");
-        if (rpcErr) {
-          const r = rpcErr.message ?? "";
+        const {
+          data: { user: signedIn },
+        } = await supabase.auth.getUser();
+        if (!signedIn) {
+          setError("Signed in, but session could not be established. Try again.");
+          return;
+        }
+
+        const { data: profile, error: profileErr } = await supabase
+          .from("user_profiles")
+          .select("role, active")
+          .eq("id", signedIn.id)
+          .maybeSingle();
+
+        if (profileErr) {
+          const r = profileErr.message ?? "";
           if (/failed to fetch|networkerror/i.test(r)) {
             setError(
-              "Signed in, but the server could not verify admin access (RPC failed). Check your network connection first. If you’re online, confirm your Supabase migrations are applied (including `20260422133000_phase1_admin_portal_access.sql`).",
+              "Signed in, but the server could not verify admin access. Check your network connection first.",
             );
             return;
           }
-          if (isMissingAdminPortalRpc(rpcErr)) {
+          if (isMissingAdminPortalRpc(profileErr)) {
             await supabase.auth.signOut();
             setError(
-              "Signed in, but your Supabase database is missing `public.can_access_admin_portal()`. Run the SQL migration `20260422133000_phase1_admin_portal_access.sql` in the Supabase SQL editor (or apply migrations), then try again.",
+              "Signed in, but user profiles are not set up. Apply Supabase migrations (including `20260521120000_user_profiles_rbac.sql`), then try again.",
             );
             return;
           }
@@ -129,11 +143,16 @@ export function AdminLoginForm() {
           setError(`Access check failed: ${r}`);
           return;
         }
-        if (!ok) {
+
+        if (!isPortalProfileAllowed(profile)) {
           await supabase.auth.signOut();
-          setError("This account is not authorized for the admin portal. Ask an owner to assign a staff role in public.users.");
+          setError(
+            "This account is not authorized for the admin portal. Ask an owner to provision your account under Users.",
+          );
           return;
         }
+
+        void supabase.rpc("record_portal_login");
 
         router.push(safeAdminPostLoginPath(next));
         router.refresh();

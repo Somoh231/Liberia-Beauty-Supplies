@@ -2,7 +2,7 @@
 
 import { signOutAdmin } from "@/app/actions/admin-auth";
 import type { AdminPortalRole } from "@/lib/auth/admin-roles";
-import { isSalonStaffRole } from "@/lib/auth/admin-roles";
+import { isSalonOwnerRole, isSalonStaffRole, roleBadgeLabel } from "@/lib/auth/admin-roles";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -29,11 +29,12 @@ export function AdminChrome({
   email,
   roleSlug,
   showOpsTrustLinks = false,
+  showUsersLink = false,
 }: {
   email: string;
   roleSlug: AdminPortalRole;
-  /** Owner / manager / legacy admin — reconciliation and operational settings */
   showOpsTrustLinks?: boolean;
+  showUsersLink?: boolean;
 }) {
   const pathname = usePathname() || "";
   const nav = navForRole(roleSlug);
@@ -41,10 +42,14 @@ export function AdminChrome({
   const opsExtras =
     showOpsTrustLinks && !isSalonStaffRole(roleSlug)
       ? ([
+          { href: "/admin/inventory/import", label: "Import" },
           { href: "/admin/reconcile", label: "Reconcile" },
           { href: "/admin/settings", label: "Settings" },
         ] as const)
       : ([] as const);
+
+  const ownerExtras = showUsersLink ? ([{ href: "/admin/users", label: "Users" }] as const) : ([] as const);
+  const extraLinks = [...ownerExtras, ...opsExtras];
 
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--admin-line)] bg-[#060607]/72 text-[var(--admin-fg)] backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-[#060607]/55 print:hidden">
@@ -63,8 +68,17 @@ export function AdminChrome({
           <span className="hidden h-7 w-px bg-gradient-to-b from-transparent via-[var(--admin-line)] to-transparent sm:block" aria-hidden />
           <div className="hidden min-w-0 text-xs sm:block">
             <span className="block truncate text-[var(--admin-fg)]/78">{email}</span>
-            <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--admin-accent)]">
-              {roleSlug}
+            <span
+              className={cn(
+                "mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] ring-1",
+                isSalonOwnerRole(roleSlug)
+                  ? "bg-[var(--admin-accent-dim)] text-[var(--admin-accent)] ring-[var(--admin-accent)]/35"
+                  : roleSlug === "manager"
+                    ? "bg-violet-500/10 text-violet-200/90 ring-violet-400/25"
+                    : "bg-white/[0.06] text-white/55 ring-white/10",
+              )}
+            >
+              {roleBadgeLabel(roleSlug)}
             </span>
           </div>
         </div>
@@ -84,8 +98,9 @@ export function AdminChrome({
               </Link>
             );
           })}
-          {opsExtras.map((item) => {
+          {extraLinks.map((item) => {
             const active = navActive(pathname, item.href);
+            const ownerOnly = item.href === "/admin/users";
             return (
               <Link
                 key={item.href}
@@ -93,6 +108,7 @@ export function AdminChrome({
                 className={cn(
                   "rounded-full px-3.5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-fg-muted)] transition duration-200 [transition-timing-function:var(--ease-out)] hover:bg-white/[0.06] hover:text-[var(--admin-fg)] active:scale-[0.98]",
                   active && "bg-white/[0.09] text-[var(--admin-fg)] ring-1 ring-[var(--admin-line-bright)]",
+                  ownerOnly && !active && "text-[var(--admin-accent)]/75",
                 )}
               >
                 {item.label}

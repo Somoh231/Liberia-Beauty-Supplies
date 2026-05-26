@@ -1,6 +1,8 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { validatePublicSupabaseEnv } from "@/lib/env/supabase-public";
+import { isPortalProfileAllowed } from "@/lib/auth/admin-portal-access";
+import { isAdminRouteAllowed } from "@/lib/auth/admin-route-access";
 import { safeAdminPostLoginPath, STAFF_LOGIN_PATH } from "@/lib/auth/safe-admin-next";
 
 async function adminMiddleware(request: NextRequest): Promise<NextResponse> {
@@ -56,10 +58,14 @@ async function adminMiddleware(request: NextRequest): Promise<NextResponse> {
     return supabaseResponse;
   }
 
-  const { data: allowed, error: rpcErr } = await supabase.rpc("can_access_admin_portal");
+  const { data: profile, error: profileErr } = await supabase
+    .from("user_profiles")
+    .select("role, active")
+    .eq("id", user.id)
+    .maybeSingle();
 
-  if (rpcErr) {
-    console.error("[middleware] can_access_admin_portal:", rpcErr.message);
+  if (profileErr) {
+    console.error("[middleware] user_profiles:", profileErr.message);
     if (!isLogin) {
       const login = new URL(STAFF_LOGIN_PATH, request.url);
       login.searchParams.set("error", "server");
@@ -68,11 +74,19 @@ async function adminMiddleware(request: NextRequest): Promise<NextResponse> {
     return supabaseResponse;
   }
 
-  if (!allowed) {
+  if (!isPortalProfileAllowed(profile)) {
     if (!isLogin) {
       const login = new URL(STAFF_LOGIN_PATH, request.url);
       login.searchParams.set("error", "forbidden");
       return NextResponse.redirect(login);
+    }
+    return supabaseResponse;
+  }
+
+  const salonRole = profile.role;
+  if (!isAdminRouteAllowed(pathname, salonRole)) {
+    if (!isLogin) {
+      return NextResponse.redirect(new URL("/admin", request.url));
     }
     return supabaseResponse;
   }

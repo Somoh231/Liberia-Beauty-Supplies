@@ -1,6 +1,7 @@
 import { AdminLoginEnvBanner } from "@/components/admin/admin-login-env-banner";
 import { AdminLoginForm } from "@/components/admin/admin-login-form";
 import { validatePublicSupabaseEnv } from "@/lib/env/supabase-public";
+import { isPortalProfileAllowed } from "@/lib/auth/admin-portal-access";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Metadata } from "next";
 import { Suspense } from "react";
@@ -27,8 +28,13 @@ async function SessionConflictBanner() {
     } = await supabase.auth.getUser();
     if (!user) return null;
 
-    const { data: allowed, error: rpcErr } = await supabase.rpc("can_access_admin_portal");
-    if (rpcErr || allowed) return null;
+    const { data: profile, error: profileErr } = await supabase
+      .from("user_profiles")
+      .select("role, active")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileErr || isPortalProfileAllowed(profile)) return null;
 
     return (
       <div className="mb-8 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-5 py-4 text-sm text-amber-100/90">

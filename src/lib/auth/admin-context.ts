@@ -1,35 +1,34 @@
 import "server-only";
 
-import type { AdminPortalRole } from "@/lib/auth/admin-roles";
+import type { AdminPortalRole, SalonRole } from "@/lib/auth/admin-roles";
+import { normalizeSalonRole } from "@/lib/auth/admin-roles";
+import { isPortalProfileAllowed } from "@/lib/auth/admin-portal-access";
 import { STAFF_LOGIN_PATH } from "@/lib/auth/safe-admin-next";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 
 export type { AdminPortalRole } from "@/lib/auth/admin-roles";
-export { isSalonStaffRole } from "@/lib/auth/admin-roles";
+export { isSalonStaffRole, roleBadgeLabel } from "@/lib/auth/admin-roles";
 
 export type AdminContext = {
   user: User;
   roleSlug: AdminPortalRole;
+  salonRole: SalonRole;
+  fullName: string | null;
+  isActive: boolean;
   /** Owner or legacy admin — full user management, destructive actions. */
   isOwner: boolean;
-  /** Owner, admin, or manager — settings, approvals, reports. */
+  /** Owner, admin, or manager — settings, imports, corrections, reports. */
   isManagerOrAbove: boolean;
+  /** Front-desk staff tier. */
+  isStaff: boolean;
   /** Any signed-in portal user. */
   isPortalUser: boolean;
 };
 
-function normalizePortalRole(slug: string | null | undefined): AdminPortalRole | null {
-  if (!slug) return null;
-  if (slug === "owner" || slug === "manager" || slug === "staff" || slug === "admin") {
-    return slug;
-  }
-  return null;
-}
-
 /**
- * Signed-in user who passes `can_access_admin_portal` RPC, with role from `public.users` + `roles`.
+ * Signed-in user with an active portal profile (read-only — no access RPC side effects).
  */
 export async function getAdminContext(): Promise<AdminContext | null> {
   let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -46,49 +45,33 @@ export async function getAdminContext(): Promise<AdminContext | null> {
 
   if (userErr || !user) return null;
 
-  const { data: allowed, error: rpcErr } = await supabase.rpc("can_access_admin_portal");
-  if (rpcErr || !allowed) return null;
-
   const { data: profile, error: profileErr } = await supabase
-    .from("users")
-    .select("role_id")
+    .from("user_profiles")
+    .select("role, active, full_name, email")
     .eq("id", user.id)
     .maybeSingle();
 
-  // Do not null the whole session on profile select errors (RLS blips, transient PostgREST).
-  // Middleware already allowed `can_access_admin_portal`; returning null here caused
-  // requireAdminContext → /admin/login ↔ middleware → /admin/inventory redirect loops.
   if (profileErr) {
-    console.error("[getAdminContext] public.users select:", profileErr.message);
+    console.error("[getAdminContext] user_profiles select:", profileErr.message);
+    return null;
   }
 
-  let roleSlug: AdminPortalRole | null = null;
+  if (!isPortalProfileAllowed(profile)) return null;
 
-  if (!profileErr && profile?.role_id) {
-    const { data: roleRow, error: roleErr } = await supabase
-      .from("roles")
-      .select("slug")
-      .eq("id", profile.role_id)
-      .maybeSingle();
-
-    if (!roleErr && roleRow?.slug) {
-      roleSlug = normalizePortalRole(roleRow.slug as string);
-    }
-  }
-
-  // Phase 1: portal access can succeed before every user row is fully backfilled with `role_id`.
-  if (!roleSlug) {
-    roleSlug = "staff";
-  }
-
-  const isOwner = roleSlug === "owner" || roleSlug === "admin";
-  const isManagerOrAbove = isOwner || roleSlug === "manager";
+  const salonRole = normalizeSalonRole(profile.role)!;
+  const roleSlug: AdminPortalRole = salonRole;
+  const isOwner = salonRole === "owner";
+  const isManagerOrAbove = isOwner || salonRole === "manager";
 
   return {
     user,
     roleSlug,
+    salonRole,
+    fullName: profile.full_name ?? null,
+    isActive: profile.active,
     isOwner,
     isManagerOrAbove,
+    isStaff: salonRole === "staff",
     isPortalUser: true,
   };
 }
@@ -97,9 +80,16 @@ export async function getAdminContext(): Promise<AdminContext | null> {
 export async function requireAdminContext(): Promise<AdminContext> {
   const ctx = await getAdminContext();
   if (!ctx) {
-    // `error=context` tells middleware not to auto-bounce back to /admin/inventory from /admin/login
     redirect(`${STAFF_LOGIN_PATH}?error=context`);
   }
   return ctx;
 }
 
+/** Owner-only pages and destructive operations. */
+export async function requireOwnerContext(): Promise<AdminContext> {
+  const ctx = await requireAdminContext();
+  if (!ctx.isOwner) {
+    redirect("/admin");
+  }
+  return ctx;
+}

@@ -1,6 +1,7 @@
 "use server";
 
 import { getAdminContext } from "@/lib/auth/admin-context";
+import { requireManagerOrAbove } from "@/lib/auth/admin-guards";
 import { parseInventoryWorkbookBuffer } from "@/lib/admin/inventory-import/workbook-parser";
 import type { InventoryImportPreviewReport } from "@/lib/admin/inventory-import/types";
 import { fetchOperationalSettings } from "@/lib/admin/salon-queries";
@@ -14,8 +15,8 @@ export type InventoryImportPreviewResult =
 const MAX_BYTES = 8 * 1024 * 1024;
 
 function requireImportAdmin(ctx: Awaited<ReturnType<typeof getAdminContext>>): string | null {
-  if (!ctx) return "unauthorized";
-  if (!ctx.isManagerOrAbove) return "forbidden";
+  const deny = requireManagerOrAbove(ctx);
+  if (deny && !deny.ok) return deny.error;
   return null;
 }
 

@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SalonPurchaseForm } from "@/components/admin/salon-purchase-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchAllSuppliersAdmin, fetchInventoryItems } from "@/lib/admin/salon-queries";
+import { fetchInventoryItems } from "@/lib/admin/salon-queries";
+import { loadSuppliersAdminPage, toSupplierOptions } from "@/lib/admin/inventory-form-bootstrap";
 import { isSalonStaffRole, requireAdminContext } from "@/lib/auth/admin-context";
 import { redirect } from "next/navigation";
 
@@ -14,7 +15,11 @@ export default async function AdminPurchasesNewPage() {
   if (isSalonStaffRole(ctx.roleSlug)) redirect("/admin/inventory");
 
   const supabase = await createSupabaseServerClient();
-  const [suppliers, items] = await Promise.all([fetchAllSuppliersAdmin(supabase), fetchInventoryItems(supabase)]);
+  const [{ rows: supplierRows }, items] = await Promise.all([
+    loadSuppliersAdminPage(supabase),
+    fetchInventoryItems(supabase).catch(() => [] as Awaited<ReturnType<typeof fetchInventoryItems>>),
+  ]);
+  const suppliers = toSupplierOptions((supplierRows ?? []).filter((s) => s?.active !== false));
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 pb-10">
@@ -28,10 +33,7 @@ export default async function AdminPurchasesNewPage() {
       {suppliers.length === 0 ? (
         <p className="text-sm text-amber-200/90">Add a supplier first under Suppliers.</p>
       ) : (
-        <SalonPurchaseForm
-          suppliers={suppliers.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name }))}
-          items={items.filter((i) => i.active)}
-        />
+        <SalonPurchaseForm suppliers={suppliers} items={(items ?? []).filter((i) => i?.active)} />
       )}
     </div>
   );

@@ -3,20 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SalonInventoryEditForm } from "@/components/admin/salon-inventory-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import {
-  fetchInventoryCorrectionLog,
-  fetchInventoryItem,
-  fetchInventoryMovementsForItem,
-  fetchOperationalSettings,
-  fetchSalesForItem,
-  fetchSuppliers,
-  type InventoryMovementRow,
-  type SaleRow,
-} from "@/lib/admin/salon-queries";
+import { fetchInventoryItem, type InventoryMovementRow, type SaleRow } from "@/lib/admin/salon-queries";
+import { loadInventoryDetailBootstrap, toSupplierOptions } from "@/lib/admin/inventory-form-bootstrap";
 import { formatSalonMoney, type StockStatus } from "@/lib/admin/salon-format";
 import {
   effectiveUnitCostUsdCents,
-  formatOperationalFxSummaryLineFromRates,
   inventoryValueUsdCents,
   ngnKoboToUsdCents,
   resolveOperationalFxFromSettings,
@@ -63,34 +54,13 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
   const staff = isSalonStaffRole(ctx.roleSlug);
   const { id } = await params;
   const supabase = await createSupabaseServerClient();
-  let item;
-  let suppliers;
-  let sales;
-  let movements;
-  let corrections;
-  let settings;
-  try {
-    [item, suppliers, sales, movements, corrections, settings] = await Promise.all([
-      fetchInventoryItem(supabase, id),
-      fetchSuppliers(supabase),
-      fetchSalesForItem(supabase, id, 25),
-      fetchInventoryMovementsForItem(supabase, id, 40),
-      fetchInventoryCorrectionLog(supabase, id, 15),
-      fetchOperationalSettings(supabase),
-    ]);
-  } catch (err) {
-    logSalonAdminSupabaseFailure("page:GET /admin/inventory/[id]", err, {
-      userId: ctx.user.id,
-      role: ctx.salonRole,
-      inventoryItemId: id,
-    });
-    throw err;
-  }
+  const { item, suppliers, sales, movements, corrections, settings, fxSummaryLine, loadErrors } =
+    await loadInventoryDetailBootstrap(supabase, id);
 
   if (!item) notFound();
 
   const opRates = resolveOperationalFxFromSettings(settings);
-  const fxSummaryLine = formatOperationalFxSummaryLineFromRates(opRates);
+  const supplierOptions = toSupplierOptions(suppliers);
 
   const st = item.stock_status as StockStatus | null;
   const badgeCls =
@@ -119,6 +89,12 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
       <Link href="/admin/inventory" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--admin-accent)]">
         ← Inventory
       </Link>
+      {loadErrors.length > 0 ? (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">
+          Some sections could not be loaded ({loadErrors.join(", ")}). Check server logs for{" "}
+          <code className="text-[11px]">[admin-debug]</code> entries.
+        </p>
+      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-mono text-white/50">{item.product_code}</p>
@@ -205,11 +181,11 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
         ) : null}
       </section>
 
-      {!staff && corrections.length > 0 ? (
+      {!staff && (corrections ?? []).length > 0 ? (
         <section className="admin-card p-6">
           <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Admin correction history</h2>
           <ul className="mt-4 space-y-3 text-sm">
-            {corrections.map((c) => (
+            {(corrections ?? []).map((c) => (
               <li key={c.id} className="border-b border-white/[0.06] pb-3 text-white/75">
                 <p className="font-medium text-white">{c.audit_reason}</p>
                 <p className="mt-1 text-[11px] text-white/45">{new Date(c.created_at).toLocaleString()}</p>
@@ -238,8 +214,8 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
           Quantity changes from sales, services, purchases, and manual updates (operational ledger).
         </p>
         <ul className="mt-4 space-y-2 text-sm">
-          {movements.length === 0 ? <li className="text-white/45">No movements recorded yet for this product.</li> : null}
-          {movements.map((m) => {
+          {(movements ?? []).length === 0 ? <li className="text-white/45">No movements recorded yet for this product.</li> : null}
+          {(movements ?? []).map((m) => {
             const ch = Number(m.quantity_change);
             const sign = ch > 0 ? "+" : "";
             return (
@@ -262,13 +238,13 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
         </ul>
       </section>
 
-      {!staff ? <SalonInventoryEditForm item={item} supplierOptions={suppliers.map((s) => ({ id: s.id, name: s.name }))} fxSummaryLine={fxSummaryLine} /> : null}
+      {!staff ? <SalonInventoryEditForm item={item} supplierOptions={supplierOptions} fxSummaryLine={fxSummaryLine} /> : null}
 
       <section className="admin-card p-6">
         <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Recent retail sales</h2>
         <ul className="mt-4 space-y-2 text-sm">
-          {sales.length === 0 ? <li className="text-white/45">No sales logged for this SKU yet.</li> : null}
-          {sales.map((s: SaleRow) => {
+          {(sales ?? []).length === 0 ? <li className="text-white/45">No sales logged for this SKU yet.</li> : null}
+          {(sales ?? []).map((s: SaleRow) => {
             const rev = Math.round(s.qty * s.unit_price_cents);
             const gpUsd = s.gross_profit_usd_cents;
             const gpLegacy = Math.round(s.qty * (s.unit_price_cents - s.unit_cost_cents));

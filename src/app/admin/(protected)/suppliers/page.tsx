@@ -2,9 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SalonSupplierCreateForm } from "@/components/admin/salon-supplier-create-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchAllSuppliersAdmin, fetchSupplierLastRestockMap } from "@/lib/admin/salon-queries";
+import { loadSuppliersAdminPage } from "@/lib/admin/inventory-form-bootstrap";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
-import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
 
 export const metadata: Metadata = { title: "Suppliers" };
 export const dynamic = "force-dynamic";
@@ -13,17 +12,7 @@ export default async function AdminSuppliersPage() {
   const ctx = await requireAdminContext();
   const staff = isSalonStaffRole(ctx.roleSlug);
   const supabase = await createSupabaseServerClient();
-  let rows;
-  let restock: Record<string, string | null>;
-  try {
-    [rows, restock] = await Promise.all([fetchAllSuppliersAdmin(supabase), fetchSupplierLastRestockMap(supabase)]);
-  } catch (err) {
-    logSalonAdminSupabaseFailure("page:GET /admin/suppliers", err, {
-      userId: ctx.user.id,
-      role: ctx.salonRole,
-    });
-    throw err;
-  }
+  const { rows, restock, loadErrors } = await loadSuppliersAdminPage(supabase);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 pb-10">
@@ -32,6 +21,12 @@ export default async function AdminSuppliersPage() {
       </Link>
       <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">Suppliers</h1>
       <p className="text-sm text-white/50">Lightweight directory for restock workflows.</p>
+      {loadErrors.length > 0 ? (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">
+          Some supplier data could not be loaded ({loadErrors.join(", ")}). Check server logs for{" "}
+          <code className="text-[11px]">[admin-debug]</code> entries.
+        </p>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="admin-card overflow-x-auto">
@@ -46,17 +41,17 @@ export default async function AdminSuppliersPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((s) => (
+              {(rows ?? []).map((s) => (
                 <tr key={s.id} className="border-b border-white/[0.06]">
                   <td className="px-4 py-3 text-white">
-                    {s.name}
+                    {s.name ?? "—"}
                     {!s.active ? <span className="ml-2 text-[10px] uppercase text-white/35">inactive</span> : null}
                   </td>
-                  <td className="px-4 py-3 text-white/60">{s.country_origin}</td>
+                  <td className="px-4 py-3 text-white/60">{s.country_origin ?? "—"}</td>
                   <td className="px-4 py-3 text-white/55">{s.phone ?? "—"}</td>
                   <td className="px-4 py-3 text-white/55">{s.product_category ?? "—"}</td>
                   <td className="px-4 py-3 text-white/55">
-                    {restock[s.id] ? new Date(restock[s.id] as string).toLocaleDateString() : "—"}
+                    {s.id && restock[s.id] ? new Date(restock[s.id] as string).toLocaleDateString() : "—"}
                   </td>
                 </tr>
               ))}

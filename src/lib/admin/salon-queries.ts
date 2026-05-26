@@ -1,6 +1,40 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { getMonroviaDayKey, monroviaDayUtcWindow, type SalonCurrency, type StockStatus } from "@/lib/admin/salon-format";
+import {
+  dataShapeOf,
+  isMissingColumnError,
+  logAdminQueryResult,
+  logAdminQueryStart,
+} from "@/lib/admin/admin-query-debug";
 import { effectiveUnitCostUsdCents, inventoryValueUsdCents, lineRevenueUsdEquivCents, unitGrossMarginPct } from "@/lib/admin/pricing-engine";
+
+const SUPPLIER_SELECT_FULL =
+  "id,name,contact_name,email,phone,country_origin,product_category,active";
+const SUPPLIER_SELECT_CORE = "id,name,contact_name,email,phone,country_origin,active";
+
+async function querySuppliersTable(
+  _supabase: SupabaseClient,
+  scope: string,
+  build: (select: string) => PromiseLike<{ data: unknown; error: PostgrestError | null }>,
+): Promise<SupplierRow[]> {
+  logAdminQueryStart(scope, "suppliers.select", { select: SUPPLIER_SELECT_FULL });
+  let { data, error } = await build(SUPPLIER_SELECT_FULL);
+  logAdminQueryResult(scope, error, dataShapeOf(data));
+
+  if (error && isMissingColumnError(error, "product_category")) {
+    logAdminQueryStart(scope, "suppliers.select (fallback core)", { select: SUPPLIER_SELECT_CORE });
+    const retry = await build(SUPPLIER_SELECT_CORE);
+    data = retry.data;
+    error = retry.error;
+    logAdminQueryResult(`${scope}:fallback`, error, dataShapeOf(data));
+  }
+
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as SupplierRow[]).map((row) => ({
+    ...row,
+    product_category: row.product_category ?? null,
+  }));
+}
 
 const INV_SELECT =
   "id,product_code,product_name,name,quantity_on_hand,reorder_point,reorder_level,low_stock_threshold,stock_status,avg_unit_cost_cents,total_stock_value_minor,cost_currency,default_unit_price_cents,default_price_currency,category,supplier_id,notes,unit,sku,active,deleted_at,created_at,updated_at,updated_by,last_override_at,last_override_by,last_override_reason,fx_ngn_per_usd,landed_usd_cents_per_unit,store_price_usd_cents,sell_price_usd_cents,sell_price_lrd_cents,weighted_avg_landed_usd_cents,is_addon,import_batch_id";
@@ -148,22 +182,15 @@ export type WeeklySpacePaymentRow = {
 };
 
 export async function fetchSuppliers(supabase: SupabaseClient): Promise<SupplierRow[]> {
-  const { data, error } = await supabase
-    .from("suppliers")
-    .select("id,name,contact_name,email,phone,country_origin,product_category,active")
-    .eq("active", true)
-    .order("name");
-  if (error) throw new Error(error.message);
-  return (data ?? []) as SupplierRow[];
+  return querySuppliersTable(supabase, "fetchSuppliers", (select) =>
+    supabase.from("suppliers").select(select).eq("active", true).order("name"),
+  );
 }
 
 export async function fetchAllSuppliersAdmin(supabase: SupabaseClient): Promise<SupplierRow[]> {
-  const { data, error } = await supabase
-    .from("suppliers")
-    .select("id,name,contact_name,email,phone,country_origin,product_category,active")
-    .order("name");
-  if (error) throw new Error(error.message);
-  return (data ?? []) as SupplierRow[];
+  return querySuppliersTable(supabase, "fetchAllSuppliersAdmin", (select) =>
+    supabase.from("suppliers").select(select).order("name"),
+  );
 }
 
 export type InventoryListFilters = {
@@ -252,7 +279,9 @@ export async function fetchInventoryItems(
 }
 
 export async function fetchInventoryItem(supabase: SupabaseClient, id: string): Promise<InventoryProductRow | null> {
+  logAdminQueryStart("fetchInventoryItem", "inventory_items.select", { id });
   const { data, error } = await supabase.from("inventory_items").select(INV_SELECT).eq("id", id).maybeSingle();
+  logAdminQueryResult("fetchInventoryItem", error, dataShapeOf(data));
   if (error) throw new Error(error.message);
   return (data as InventoryProductRow | null) ?? null;
 }
@@ -340,14 +369,16 @@ export async function fetchSalesForItem(
   inventoryItemId: string,
   limit = 30,
 ): Promise<SaleRow[]> {
+  const select =
+    "id,inventory_item_id,qty,unit_price_cents,unit_cost_cents,currency,sold_at,payment_method,customer_name,revenue_usd_equiv_cents,gross_profit_usd_cents";
+  logAdminQueryStart("fetchSalesForItem", "sales.select", { inventoryItemId, limit });
   const { data, error } = await supabase
     .from("sales")
-    .select(
-      "id,inventory_item_id,qty,unit_price_cents,unit_cost_cents,currency,sold_at,payment_method,customer_name,revenue_usd_equiv_cents,gross_profit_usd_cents",
-    )
+    .select(select)
     .eq("inventory_item_id", inventoryItemId)
     .order("sold_at", { ascending: false })
     .limit(limit);
+  logAdminQueryResult("fetchSalesForItem", error, dataShapeOf(data));
   if (error) throw new Error(error.message);
   return (data ?? []) as SaleRow[];
 }
@@ -832,17 +863,22 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
 }
 
 export async function fetchSupplierLastRestockMap(supabase: SupabaseClient): Promise<Record<string, string | null>> {
+  logAdminQueryStart("fetchSupplierLastRestockMap", "purchases.select", { status: "received" });
   const { data, error } = await supabase
     .from("purchases")
     .select("supplier_id,received_at")
     .eq("status", "received")
     .not("received_at", "is", null)
     .order("received_at", { ascending: false });
-  if (error) throw new Error(error.message);
+  logAdminQueryResult("fetchSupplierLastRestockMap", error, dataShapeOf(data));
+  if (error) {
+    console.error("[admin-debug] fetchSupplierLastRestockMap failed — returning empty map", error.message);
+    return {};
+  }
   const out: Record<string, string | null> = {};
   for (const r of data ?? []) {
-    const row = r as { supplier_id: string; received_at: string };
-    if (!out[row.supplier_id]) out[row.supplier_id] = row.received_at;
+    const row = r as { supplier_id?: string; received_at?: string };
+    if (row.supplier_id && row.received_at && !out[row.supplier_id]) out[row.supplier_id] = row.received_at;
   }
   return out;
 }
@@ -920,8 +956,13 @@ export type OperationalSettingsRow = {
 };
 
 export async function fetchOperationalSettings(supabase: SupabaseClient): Promise<OperationalSettingsRow | null> {
+  logAdminQueryStart("fetchOperationalSettings", "operational_settings.select", { id: 1 });
   const { data, error } = await supabase.from("operational_settings").select("*").eq("id", 1).maybeSingle();
-  if (error) throw new Error(error.message);
+  logAdminQueryResult("fetchOperationalSettings", error, dataShapeOf(data));
+  if (error) {
+    console.error("[admin-debug] fetchOperationalSettings failed — returning null", error.message);
+    return null;
+  }
   return (data as OperationalSettingsRow | null) ?? null;
 }
 
@@ -986,15 +1027,24 @@ export async function fetchInventoryMovementsForItem(
   inventoryItemId: string,
   limit = 50,
 ): Promise<InventoryMovementRow[]> {
+  const select =
+    "id,inventory_item_id,movement_type,quantity_before,quantity_change,quantity_after,unit_cost_basis_cents,fx_snapshot,reference_type,reference_id,notes,created_by,created_at";
+  logAdminQueryStart("fetchInventoryMovementsForItem", "inventory_movements.select", { inventoryItemId, limit });
   const { data, error } = await supabase
     .from("inventory_movements")
-    .select(
-      "id,inventory_item_id,movement_type,quantity_before,quantity_change,quantity_after,unit_cost_basis_cents,fx_snapshot,reference_type,reference_id,notes,created_by,created_at",
-    )
+    .select(select)
     .eq("inventory_item_id", inventoryItemId)
     .order("created_at", { ascending: false })
     .limit(limit);
-  if (error) throw new Error(error.message);
+  logAdminQueryResult("fetchInventoryMovementsForItem", error, dataShapeOf(data));
+  if (error) {
+    const pg = error as PostgrestError;
+    if (pg.code === "42P01" || pg.message?.includes("inventory_movements")) {
+      console.error("[admin-debug] inventory_movements unavailable — returning []");
+      return [];
+    }
+    throw new Error(error.message);
+  }
   return (data ?? []) as InventoryMovementRow[];
 }
 
@@ -1024,15 +1074,24 @@ export async function fetchInventoryCorrectionLog(
   inventoryItemId: string,
   limit = 25,
 ): Promise<InventoryCorrectionLogRow[]> {
+  const select =
+    "id,inventory_item_id,corrected_by,created_at,audit_reason,movement_type,quantity_before,quantity_after,avg_unit_cost_cents_before,avg_unit_cost_cents_after,sell_price_usd_cents_before,sell_price_usd_cents_after,weighted_avg_landed_usd_cents_before,weighted_avg_landed_usd_cents_after,active_before,active_after,archived_before,archived_after";
+  logAdminQueryStart("fetchInventoryCorrectionLog", "inventory_correction_log.select", { inventoryItemId, limit });
   const { data, error } = await supabase
     .from("inventory_correction_log")
-    .select(
-      "id,inventory_item_id,corrected_by,created_at,audit_reason,movement_type,quantity_before,quantity_after,avg_unit_cost_cents_before,avg_unit_cost_cents_after,sell_price_usd_cents_before,sell_price_usd_cents_after,weighted_avg_landed_usd_cents_before,weighted_avg_landed_usd_cents_after,active_before,active_after,archived_before,archived_after",
-    )
+    .select(select)
     .eq("inventory_item_id", inventoryItemId)
     .order("created_at", { ascending: false })
     .limit(limit);
-  if (error) throw new Error(error.message);
+  logAdminQueryResult("fetchInventoryCorrectionLog", error, dataShapeOf(data));
+  if (error) {
+    const pg = error as PostgrestError;
+    if (pg.code === "42P01" || pg.message?.includes("inventory_correction_log")) {
+      console.error("[admin-debug] inventory_correction_log unavailable — returning []");
+      return [];
+    }
+    throw new Error(error.message);
+  }
   return (data ?? []) as InventoryCorrectionLogRow[];
 }
 

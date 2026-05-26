@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SalonReceivePurchaseButton } from "@/components/admin/salon-receive-purchase-button";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchAllSuppliersAdmin, fetchPurchases } from "@/lib/admin/salon-queries";
+import { fetchPurchases } from "@/lib/admin/salon-queries";
+import { loadSuppliersAdminPage } from "@/lib/admin/inventory-form-bootstrap";
 import { isSalonStaffRole, requireAdminContext } from "@/lib/auth/admin-context";
 import { redirect } from "next/navigation";
 export const metadata: Metadata = { title: "Purchases" };
@@ -13,8 +14,11 @@ export default async function AdminPurchasesPage() {
   if (isSalonStaffRole(ctx.roleSlug)) redirect("/admin/inventory");
 
   const supabase = await createSupabaseServerClient();
-  const [purchases, suppliers] = await Promise.all([fetchPurchases(supabase, 60), fetchAllSuppliersAdmin(supabase)]);
-  const supplierName = Object.fromEntries(suppliers.map((s) => [s.id, s.name]));
+  const [purchases, { rows: suppliers }] = await Promise.all([
+    fetchPurchases(supabase, 60).catch(() => [] as Awaited<ReturnType<typeof fetchPurchases>>),
+    loadSuppliersAdminPage(supabase),
+  ]);
+  const supplierName = Object.fromEntries((suppliers ?? []).filter((s) => s?.id).map((s) => [s.id, s.name ?? "—"]));
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 pb-10">

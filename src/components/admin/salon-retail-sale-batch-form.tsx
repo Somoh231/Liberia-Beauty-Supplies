@@ -14,6 +14,7 @@ import { currencyShortLabel, formatSalonMoney, normalizeCurrency, parseMoneyToCe
 import { OperationalFxBanner } from "@/components/admin/operational-fx-banner";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { InventoryProductTypeaheadSelect } from "@/components/admin/inventory-product-typeahead";
 
 const field =
   "mt-1 w-full min-h-[2.75rem] rounded-xl border border-white/12 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-white/35 focus:border-[var(--admin-accent)]/45 focus:outline-none focus:ring-1 focus:ring-[var(--admin-accent)]/30 sm:min-h-0";
@@ -24,6 +25,7 @@ const fieldReadonly =
 type Row = RetailSaleLineInput & { key: string; allowPriceOverride?: boolean };
 
 function newRow(): Row {
+  const today = new Date().toISOString().slice(0, 10);
   return {
     key: crypto.randomUUID(),
     inventoryItemId: "",
@@ -32,6 +34,7 @@ function newRow(): Row {
     currency: "USD",
     customerName: "",
     notes: "",
+    saleDate: today,
     allowPriceOverride: false,
   };
 }
@@ -78,12 +81,18 @@ export function SalonRetailSaleBatchForm({
       const parsed = JSON.parse(raw) as { saleDate?: string; rows?: Row[] };
       if (!parsed?.rows?.length) return;
       if (window.confirm("Restore unsaved sale draft from this device?")) {
-        if (parsed.saleDate && /^\d{4}-\d{2}-\d{2}$/.test(parsed.saleDate)) setSaleDate(parsed.saleDate);
+        const legacyDefault =
+          parsed.saleDate && /^\d{4}-\d{2}-\d{2}$/.test(parsed.saleDate) ? parsed.saleDate : null;
+        if (legacyDefault) setSaleDate(legacyDefault);
         setRows(
           parsed.rows.map((r) => ({
             ...newRow(),
             ...r,
             key: r.key && typeof r.key === "string" ? r.key : crypto.randomUUID(),
+            saleDate:
+              r.saleDate && /^\d{4}-\d{2}-\d{2}$/.test(r.saleDate)
+                ? r.saleDate
+                : legacyDefault ?? new Date().toISOString().slice(0, 10),
           })),
         );
       }
@@ -192,6 +201,7 @@ export function SalonRetailSaleBatchForm({
                 currency: normalizeCurrency(r.currency),
                 customerName: r.customerName || null,
                 notes: r.notes || null,
+                saleDate: r.saleDate?.trim() || saleDate,
               }));
             const r = await createRetailSalesBatchAction({ saleDate, lines });
             if (!r.ok) {
@@ -211,7 +221,7 @@ export function SalonRetailSaleBatchForm({
       <OperationalFxBanner className="mb-1" summaryLine={operationalFxSummaryLine} />
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block text-xs text-white/55">
-          Sale date
+          Default date (fallback)
           <input type="date" className={field} value={saleDate} onChange={(e) => setSaleDate(e.target.value)} required />
         </label>
         <p className="self-end text-xs text-white/40">
@@ -247,11 +257,12 @@ export function SalonRetailSaleBatchForm({
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:items-end">
                 <label className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-white/45 lg:col-span-2">
                   Product
-                  <select
-                    className={field}
+                  <InventoryProductTypeaheadSelect
+                    items={items}
                     value={row.inventoryItemId}
-                    onChange={(e) => {
-                      const v = e.target.value;
+                    placeholder="—"
+                    inputClassName={field}
+                    onValueChange={(v) => {
                       const it = itemById[v];
                       const cat = it ? catalogDefaults(it) : { currency: "USD" as const, unitPriceMajor: "" };
                       setRows((rs) => {
@@ -266,14 +277,23 @@ export function SalonRetailSaleBatchForm({
                         return next;
                       });
                     }}
-                  >
-                    <option value="">—</option>
-                    {items.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.product_name} ({i.quantity_on_hand} {i.unit})
-                      </option>
-                    ))}
-                  </select>
+                  />
+                </label>
+                <label className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-white/45 lg:col-span-2">
+                  Date
+                  <input
+                    type="date"
+                    className={field}
+                    value={row.saleDate ?? saleDate}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setRows((rs) => {
+                        const next = [...rs];
+                        next[idx] = { ...next[idx], saleDate: v };
+                        return next;
+                      });
+                    }}
+                  />
                 </label>
                 <label className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-white/45">
                   Qty

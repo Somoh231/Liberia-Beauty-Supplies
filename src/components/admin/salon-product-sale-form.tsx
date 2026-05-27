@@ -2,9 +2,10 @@
 
 import { createProductSaleAction } from "@/app/actions/admin-salon";
 import type { InventoryItemRow } from "@/lib/admin/salon-queries";
-import { formatSalonMoney, normalizeCurrency } from "@/lib/admin/salon-format";
+import { normalizeCurrency } from "@/lib/admin/salon-format";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
+import { InventoryProductTypeaheadSelect } from "@/components/admin/inventory-product-typeahead";
 
 const field =
   "mt-1.5 w-full rounded-xl border border-white/12 bg-black/30 px-3 py-3 text-sm text-white placeholder:text-white/35 focus:border-[var(--admin-accent)]/45 focus:outline-none focus:ring-1 focus:ring-[var(--admin-accent)]/30";
@@ -43,22 +44,16 @@ export function SalonProductSaleForm({ items }: { items: InventoryItemRow[] }) {
       }}
     >
       {err ? <p className="text-sm text-red-300">{err}</p> : null}
+      <input type="hidden" name="inventory_item_id" value={itemId} />
       <label className="block text-xs text-white/55">
         Product
-        <select
-          name="inventory_item_id"
-          className={field}
+        <InventoryProductTypeaheadSelect
+          items={items}
           value={itemId}
-          onChange={(e) => setItemId(e.target.value)}
-          required
-        >
-          {items.length === 0 ? <option value="">No products yet</option> : null}
-          {items.map((i) => (
-            <option key={i.id} value={i.id}>
-              {i.name} · {i.quantity_on_hand} {i.unit} @ {formatSalonMoney(i.avg_unit_cost_cents, i.cost_currency)} cost
-            </option>
-          ))}
-        </select>
+          placeholder={items.length === 0 ? "No products yet" : "—"}
+          inputClassName={field}
+          onValueChange={(v) => setItemId(v)}
+        />
       </label>
       {selected ? (
         <p className="text-xs text-white/45">

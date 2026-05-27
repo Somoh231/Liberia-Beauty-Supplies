@@ -27,7 +27,9 @@ export type { SalonActionResult } from "@/lib/auth/salon-action-result";
 function revalidateSalon() {
   revalidatePath("/admin");
   revalidatePath("/admin/inventory");
+  revalidatePath("/admin/inventory/new");
   revalidatePath("/admin/purchases");
+  revalidatePath("/admin/purchases/new");
   revalidatePath("/admin/sales");
   revalidatePath("/admin/sales/new");
   revalidatePath("/admin/services");
@@ -61,26 +63,65 @@ export async function createSupplierAction(input: {
   const name = input.name?.trim() ?? "";
   if (name.length < 2) return { ok: false, error: "invalid_name" };
 
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("suppliers")
-    .insert({
-      name,
-      contact_name: input.contactName?.trim() || null,
-      email: input.email?.trim() || null,
-      phone: input.phone?.trim() || null,
-      country_origin: (input.countryOrigin?.trim() || "Nigeria").slice(0, 64),
-      notes: input.notes?.trim() || null,
-      product_category: input.productCategory?.trim() || null,
-      active: true,
-    })
-    .select("id")
-    .maybeSingle();
+  console.error("[supplier-create]", {
+    stage: "start",
+    userId: ctx?.user?.id ?? null,
+    role: ctx?.salonRole ?? null,
+    namePreview: name.slice(0, 80),
+  });
 
-  if (error) return { ok: false, error: error.message };
-  const id = (data as { id: string } | null)?.id;
-  revalidateSalon();
-  return { ok: true, id };
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase
+      .from("suppliers")
+      .insert({
+        name,
+        contact_name: input.contactName?.trim() || null,
+        email: input.email?.trim() || null,
+        phone: input.phone?.trim() || null,
+        country_origin: (input.countryOrigin?.trim() || "Nigeria").slice(0, 64),
+        notes: input.notes?.trim() || null,
+        product_category: input.productCategory?.trim() || null,
+        active: true,
+      })
+      .select("id,name")
+      .maybeSingle();
+
+    if (error) {
+      const msg = error.message ?? "";
+      console.error("[supplier-create]", {
+        stage: "insert_error",
+        code: error.code ?? null,
+        message: msg,
+      });
+
+      if (error.code === "23505" || msg.toLowerCase().includes("duplicate")) {
+        return { ok: false, error: "duplicate_supplier" };
+      }
+      if (
+        error.code === "42501" ||
+        msg.toLowerCase().includes("row level security") ||
+        msg.toLowerCase().includes("permission")
+      ) {
+        return { ok: false, error: "permission_denied" };
+      }
+      return { ok: false, error: "db_insert_failed" };
+    }
+
+    const dRow = data as { id: string; name?: string } | null;
+    const id = dRow?.id;
+    console.error("[supplier-create]", {
+      stage: "insert_ok",
+      id: id ?? null,
+      name: dRow?.name ?? null,
+    });
+    revalidateSalon();
+    return { ok: true, id };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "unknown_error";
+    console.error("[supplier-create]", { stage: "exception", message: msg });
+    return { ok: false, error: "db_insert_failed" };
+  }
 }
 
 export async function createInventoryItemAction(input: {
@@ -379,6 +420,8 @@ export type RetailSaleLineInput = {
   currency: SalonCurrency;
   customerName?: string | null;
   notes?: string | null;
+  // Optional per-line override (YYYY-MM-DD). If missing, the batch saleDate is used.
+  saleDate?: string | null;
 };
 
 export async function createRetailSalesBatchAction(input: {
@@ -394,6 +437,8 @@ export async function createRetailSalesBatchAction(input: {
   if (!activeLines.length) return { ok: false, error: "no_lines" };
 
   for (const ln of activeLines) {
+    const perLineDateRaw = ln.saleDate?.trim();
+    const soldDate = perLineDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(perLineDateRaw) ? perLineDateRaw : d;
     const r = await createProductSaleAction({
       inventoryItemId: ln.inventoryItemId,
       qty: ln.qty,
@@ -401,7 +446,7 @@ export async function createRetailSalesBatchAction(input: {
       currency: ln.currency,
       customerName: ln.customerName,
       notes: ln.notes,
-      saleDate: d,
+      saleDate: soldDate,
     });
     if (!r.ok) return r;
   }
@@ -483,6 +528,8 @@ export type ServiceLogLineInput = {
   customerName?: string | null;
   customerPhone?: string | null;
   customerFacebook?: string | null;
+  // Optional per-line override (YYYY-MM-DD). If missing, the batch serviceDate is used.
+  serviceDate?: string | null;
 };
 
 export async function createServiceLogsBatchAction(input: {
@@ -498,6 +545,8 @@ export async function createServiceLogsBatchAction(input: {
   if (!active.length) return { ok: false, error: "no_lines" };
 
   for (const ln of active) {
+    const perLineDateRaw = ln.serviceDate?.trim();
+    const soldDate = perLineDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(perLineDateRaw) ? perLineDateRaw : d;
     const name =
       ln.serviceCategory === "Others" && ln.notes?.trim()
         ? `Others — ${ln.notes.trim()}`
@@ -513,7 +562,7 @@ export async function createServiceLogsBatchAction(input: {
       customerPhone: ln.customerPhone,
       customerFacebook: ln.customerFacebook,
       productUsage: [],
-      serviceDate: d,
+      serviceDate: soldDate,
     });
     if (!r.ok) return r;
   }

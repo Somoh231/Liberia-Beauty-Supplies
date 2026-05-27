@@ -15,6 +15,7 @@ const fieldCompact =
 type Row = ServiceLogLineInput & { key: string };
 
 function newRow(): Row {
+  const today = new Date().toISOString().slice(0, 10);
   return {
     key: crypto.randomUUID(),
     serviceCategory: SERVICE_CATEGORY_OPTIONS[0],
@@ -25,6 +26,7 @@ function newRow(): Row {
     customerName: "",
     customerPhone: "",
     customerFacebook: "",
+    serviceDate: today,
   };
 }
 
@@ -48,12 +50,18 @@ export function SalonServiceBatchForm() {
       const parsed = JSON.parse(raw) as { serviceDate?: string; rows?: Row[] };
       if (!parsed?.rows?.length) return;
       if (window.confirm("Restore unsaved service draft from this device?")) {
-        if (parsed.serviceDate && /^\d{4}-\d{2}-\d{2}$/.test(parsed.serviceDate)) setServiceDate(parsed.serviceDate);
+        const legacyDefault =
+          parsed.serviceDate && /^\d{4}-\d{2}-\d{2}$/.test(parsed.serviceDate) ? parsed.serviceDate : null;
+        if (legacyDefault) setServiceDate(legacyDefault);
         setRows(
           parsed.rows.map((r) => ({
             ...newRow(),
             ...r,
             key: r.key && typeof r.key === "string" ? r.key : crypto.randomUUID(),
+            serviceDate:
+              r.serviceDate && /^\d{4}-\d{2}-\d{2}$/.test(r.serviceDate)
+                ? r.serviceDate
+                : legacyDefault ?? new Date().toISOString().slice(0, 10),
           })),
         );
       }
@@ -148,6 +156,7 @@ export function SalonServiceBatchForm() {
                   customerName: r.customerName || null,
                   customerPhone: r.customerPhone || null,
                   customerFacebook: r.customerFacebook || null,
+                  serviceDate: r.serviceDate?.trim() || serviceDate,
                 }));
               const res = await createServiceLogsBatchAction({ serviceDate, lines });
               if (!res.ok) {
@@ -165,7 +174,7 @@ export function SalonServiceBatchForm() {
       >
         {err ? <p className="text-sm text-red-300">{err}</p> : null}
         <label className="block text-xs text-white/55">
-          Service date
+          Default service date (fallback)
           <input type="date" className={field} value={serviceDate} onChange={(e) => setServiceDate(e.target.value)} required />
         </label>
 
@@ -255,6 +264,23 @@ export function SalonServiceBatchForm() {
                   }}
                 />
               </div>
+
+              <label className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-white/45">
+                Date
+                <input
+                  type="date"
+                  className={field}
+                  value={row.serviceDate ?? serviceDate}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setRows((rs) => {
+                      const next = [...rs];
+                      next[idx] = { ...next[idx], serviceDate: v };
+                      return next;
+                    });
+                  }}
+                />
+              </label>
 
               <div className="grid gap-2 border-t border-white/[0.06] pt-2 sm:grid-cols-3">
                 <label className="block text-[9px] font-semibold uppercase tracking-[0.1em] text-white/35">

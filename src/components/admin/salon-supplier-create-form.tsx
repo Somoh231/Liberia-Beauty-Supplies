@@ -12,6 +12,21 @@ export function SalonSupplierCreateForm() {
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
 
+  function toUserFacingErrorMessage(code: string): string {
+    switch (code) {
+      case "invalid_name":
+        return "Missing or invalid supplier name.";
+      case "duplicate_supplier":
+        return "That supplier already exists.";
+      case "permission_denied":
+        return "You do not have permission to create suppliers.";
+      case "db_insert_failed":
+        return "Could not create supplier. Please try again.";
+      default:
+        return code.replace(/_/g, " ");
+    }
+  }
+
   return (
     <form
       className="admin-card space-y-3 p-5"
@@ -30,7 +45,7 @@ export function SalonSupplierCreateForm() {
             productCategory: String(fd.get("product_category") ?? "") || null,
           });
           if (!r.ok) {
-            setErr(r.error);
+            setErr(toUserFacingErrorMessage(r.error));
             return;
           }
           e.currentTarget.reset();

@@ -55,6 +55,8 @@ export const SERVICE_CATEGORY_OPTIONS = [
   "Manicure",
   "Pedicure",
   "Micro Blading",
+  "Make-up",
+  "Lashes",
   "Photo shoot",
   "Barber",
   "Wig sewing",

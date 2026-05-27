@@ -5,6 +5,7 @@ import type { InventoryItemRow } from "@/lib/admin/salon-queries";
 import { normalizeCurrency } from "@/lib/admin/salon-format";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { InventoryProductTypeaheadSelect } from "@/components/admin/inventory-product-typeahead";
 
 const field =
   "mt-1.5 w-full rounded-xl border border-white/12 bg-black/30 px-3 py-3 text-sm text-white placeholder:text-white/35 focus:border-[var(--admin-accent)]/45 focus:outline-none focus:ring-1 focus:ring-[var(--admin-accent)]/30";
@@ -100,22 +101,17 @@ export function SalonServiceLogForm({ items }: { items: InventoryItemRow[] }) {
           <div key={idx} className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
             <label className="block flex-1 text-xs text-white/55">
               Item
-              <select
-                className={field}
+              <InventoryProductTypeaheadSelect
+                items={items}
                 value={row.id}
-                onChange={(e) => {
+                placeholder="—"
+                inputClassName={field}
+                onValueChange={(v) => {
                   const next = [...usageRows];
-                  next[idx] = { ...next[idx], id: e.target.value };
+                  next[idx] = { ...next[idx], id: v };
                   setUsageRows(next);
                 }}
-              >
-                <option value="">—</option>
-                {items.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.name}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <label className="block w-full text-xs text-white/55 sm:w-28">
               Qty

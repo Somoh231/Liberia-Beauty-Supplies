@@ -102,6 +102,7 @@ export type SaleRow = {
   sold_at: string;
   payment_method: string | null;
   customer_name: string | null;
+  notes: string | null;
   revenue_usd_equiv_cents: number | null;
   gross_profit_usd_cents: number | null;
 };
@@ -318,12 +319,96 @@ export async function fetchSalesSince(supabase: SupabaseClient, iso: string): Pr
   const { data, error } = await supabase
     .from("sales")
     .select(
-      "id,inventory_item_id,qty,unit_price_cents,unit_cost_cents,currency,sold_at,payment_method,customer_name,revenue_usd_equiv_cents,gross_profit_usd_cents",
+      "id,inventory_item_id,qty,unit_price_cents,unit_cost_cents,currency,sold_at,payment_method,customer_name,notes,revenue_usd_equiv_cents,gross_profit_usd_cents",
     )
     .gte("sold_at", iso)
     .order("sold_at", { ascending: false });
   if (error) throw new Error(error.message);
   return (data ?? []) as SaleRow[];
+}
+
+export type RetailSaleListRow = SaleRow & { product_name: string; product_code: string };
+
+function saleInventoryJoin(
+  inv: { product_name: string; product_code: string } | { product_name: string; product_code: string }[] | null | undefined,
+): { product_name: string; product_code: string } | null {
+  if (!inv) return null;
+  return Array.isArray(inv) ? (inv[0] ?? null) : inv;
+}
+
+function mapRetailSaleRow(row: Record<string, unknown>): RetailSaleListRow {
+  const { inventory_items: invJoin, ...sale } = row;
+  const inv = saleInventoryJoin(
+    invJoin as { product_name: string; product_code: string } | { product_name: string; product_code: string }[] | null,
+  );
+  return {
+    ...(sale as SaleRow),
+    product_name: inv?.product_name ?? "—",
+    product_code: inv?.product_code ?? "",
+  };
+}
+
+export async function fetchRetailSalesRecent(
+  supabase: SupabaseClient,
+  limit = 50,
+): Promise<RetailSaleListRow[]> {
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - 90);
+  const { data, error } = await supabase
+    .from("sales")
+    .select(
+      "id,inventory_item_id,qty,unit_price_cents,unit_cost_cents,currency,sold_at,payment_method,customer_name,notes,revenue_usd_equiv_cents,gross_profit_usd_cents,inventory_items(product_name,product_code)",
+    )
+    .gte("sold_at", since.toISOString())
+    .order("sold_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => mapRetailSaleRow(row as Record<string, unknown>));
+}
+
+export async function fetchRetailSaleById(
+  supabase: SupabaseClient,
+  saleId: string,
+): Promise<RetailSaleListRow | null> {
+  const { data, error } = await supabase
+    .from("sales")
+    .select(
+      "id,inventory_item_id,qty,unit_price_cents,unit_cost_cents,currency,sold_at,payment_method,customer_name,notes,revenue_usd_equiv_cents,gross_profit_usd_cents,inventory_items(product_name,product_code)",
+    )
+    .eq("id", saleId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return mapRetailSaleRow(data as Record<string, unknown>);
+}
+
+export type SpaceLeasePaymentRow = {
+  id: string;
+  stylist_name: string;
+  week_start_date: string;
+  week_end_date: string;
+  amount_cents: number;
+  currency: SalonCurrency;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function fetchSpaceLeasePayments(
+  supabase: SupabaseClient,
+  limit = 80,
+): Promise<SpaceLeasePaymentRow[]> {
+  const { data, error } = await supabase
+    .from("space_lease_payments")
+    .select("id,stylist_name,week_start_date,week_end_date,amount_cents,currency,notes,created_at,updated_at")
+    .order("week_start_date", { ascending: false })
+    .limit(limit);
+  if (error) {
+    const pg = error as PostgrestError;
+    if (pg.code === "42P01" || pg.message?.includes("space_lease_payments")) return [];
+    throw new Error(error.message);
+  }
+  return (data ?? []) as SpaceLeasePaymentRow[];
 }
 
 export async function fetchServiceLogsSince(supabase: SupabaseClient, iso: string): Promise<ServiceLogRow[]> {
@@ -370,7 +455,7 @@ export async function fetchSalesForItem(
   limit = 30,
 ): Promise<SaleRow[]> {
   const select =
-    "id,inventory_item_id,qty,unit_price_cents,unit_cost_cents,currency,sold_at,payment_method,customer_name,revenue_usd_equiv_cents,gross_profit_usd_cents";
+    "id,inventory_item_id,qty,unit_price_cents,unit_cost_cents,currency,sold_at,payment_method,customer_name,notes,revenue_usd_equiv_cents,gross_profit_usd_cents";
   logAdminQueryStart("fetchSalesForItem", "sales.select", { inventoryItemId, limit });
   const { data, error } = await supabase
     .from("sales")
@@ -587,9 +672,11 @@ export type SaleLogAnalytics = {
   monthServiceUsdCents: number;
   ytdRetailUsdCents: number;
   ytdServiceUsdCents: number;
-  weekNative: { retail: CurrencyTotals; service: CurrencyTotals };
-  monthNative: { retail: CurrencyTotals; service: CurrencyTotals };
-  ytdNative: { retail: CurrencyTotals; service: CurrencyTotals };
+  weekRentalUsdCents: number;
+  monthRentalUsdCents: number;
+  weekNative: { retail: CurrencyTotals; service: CurrencyTotals; rental: CurrencyTotals };
+  monthNative: { retail: CurrencyTotals; service: CurrencyTotals; rental: CurrencyTotals };
+  ytdNative: { retail: CurrencyTotals; service: CurrencyTotals; rental: CurrencyTotals };
   topProducts: { name: string; qty: number; revenueUsdCents: number }[];
   /** Last 30 days — quantity sold, for operational charts */
   topProductsByQty: { name: string; qty: number; revenueUsdCents: number }[];
@@ -680,19 +767,28 @@ function startOfYearIso(): string {
 
 export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<SaleLogAnalytics> {
   const iso = startOfYearIso();
-  const [{ data: saleRows, error: e1 }, { data: serviceRows, error: e2 }, items] = await Promise.all([
-    supabase
-      .from("sales")
-      .select("inventory_item_id,qty,unit_price_cents,currency,sold_at,revenue_usd_equiv_cents")
-      .gte("sold_at", iso),
-    supabase
-      .from("service_logs")
-      .select("service_name,service_category,revenue_cents,currency,sold_at,revenue_usd_equiv_cents")
-      .gte("sold_at", iso),
-    fetchInventoryProducts(supabase, {}),
-  ]);
+  const yearStartDate = iso.slice(0, 10);
+  const [{ data: saleRows, error: e1 }, { data: serviceRows, error: e2 }, { data: leaseRows, error: e3 }, items] =
+    await Promise.all([
+      supabase
+        .from("sales")
+        .select("inventory_item_id,qty,unit_price_cents,currency,sold_at,revenue_usd_equiv_cents")
+        .gte("sold_at", iso),
+      supabase
+        .from("service_logs")
+        .select("service_name,service_category,revenue_cents,currency,sold_at,revenue_usd_equiv_cents")
+        .gte("sold_at", iso),
+      supabase
+        .from("space_lease_payments")
+        .select("amount_cents,currency,week_start_date")
+        .gte("week_start_date", yearStartDate),
+      fetchInventoryProducts(supabase, {}),
+    ]);
   if (e1) throw new Error(e1.message);
   if (e2) throw new Error(e2.message);
+  if (e3 && (e3 as PostgrestError).code !== "42P01" && !e3.message?.includes("space_lease_payments")) {
+    throw new Error(e3.message);
+  }
 
   const nameById = Object.fromEntries(items.map((i) => [i.id, i.product_name]));
 
@@ -724,9 +820,9 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
     m[day] = (m[day] ?? 0) + v;
   };
 
-  const weekNative = { retail: emptyNative(), service: emptyNative() };
-  const monthNative = { retail: emptyNative(), service: emptyNative() };
-  const ytdNative = { retail: emptyNative(), service: emptyNative() };
+  const weekNative = { retail: emptyNative(), service: emptyNative(), rental: emptyNative() };
+  const monthNative = { retail: emptyNative(), service: emptyNative(), rental: emptyNative() };
+  const ytdNative = { retail: emptyNative(), service: emptyNative(), rental: emptyNative() };
 
   const addNative = (bag: CurrencyTotals, currency: SalonCurrency, minor: number) => {
     if (currency === "USD") bag.USD += minor;
@@ -771,6 +867,24 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
   let weekServiceUsdCents = 0;
   let monthRetailUsdCents = 0;
   let monthServiceUsdCents = 0;
+  let weekRentalUsdCents = 0;
+  let monthRentalUsdCents = 0;
+
+  type LeaseLite = { amount_cents: number; currency: SalonCurrency; week_start_date: string };
+  for (const p of (leaseRows ?? []) as LeaseLite[]) {
+    const cur = p.currency;
+    const revUsd = lineRevenueUsdEquivCents(p.amount_cents, 1, cur);
+    addNative(ytdNative.rental, cur, p.amount_cents);
+    const t = new Date(`${p.week_start_date}T12:00:00.000Z`).getTime();
+    if (t >= weekAgo) {
+      weekRentalUsdCents += revUsd;
+      addNative(weekNative.rental, cur, p.amount_cents);
+    }
+    if (t >= monthAgo) {
+      monthRentalUsdCents += revUsd;
+      addNative(monthNative.rental, cur, p.amount_cents);
+    }
+  }
 
   for (const s of sales) {
     const t = new Date(s.sold_at).getTime();
@@ -852,6 +966,8 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
     monthServiceUsdCents,
     ytdRetailUsdCents,
     ytdServiceUsdCents,
+    weekRentalUsdCents,
+    monthRentalUsdCents,
     weekNative,
     monthNative,
     ytdNative,
@@ -1004,7 +1120,9 @@ export type InventoryMovementType =
   | "damaged"
   | "expired"
   | "restock"
-  | "opening_balance";
+  | "opening_balance"
+  | "sale_edit_restore"
+  | "sale_edit_deduct";
 
 export type InventoryMovementRow = {
   id: string;

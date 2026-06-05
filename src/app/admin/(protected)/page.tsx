@@ -235,6 +235,23 @@ export default async function AdminDashboardPage() {
 
           {chartPayload ? <AdminDashboardCharts data={chartPayload} /> : null}
 
+          {saleLogAnalytics ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="admin-card p-5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Weekly rental income</p>
+                <p className="mt-2 text-xl text-white">{formatSalonMoney(saleLogAnalytics.weekRentalUsdCents, "USD")}</p>
+                <p className="mt-1 text-[11px] text-white/40">Space lease — operating revenue</p>
+              </div>
+              <div className="admin-card p-5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Month rental income</p>
+                <p className="mt-2 text-xl text-white">{formatSalonMoney(saleLogAnalytics.monthRentalUsdCents, "USD")}</p>
+                <Link href="/admin/sales-log" className="mt-2 inline-block text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]">
+                  Sale log →
+                </Link>
+              </div>
+            </div>
+          ) : null}
+
           <section className="admin-card p-5">
             <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Today&apos;s revenue</h2>
             <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

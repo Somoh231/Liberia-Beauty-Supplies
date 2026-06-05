@@ -33,6 +33,8 @@ function movementTypeLabel(t: InventoryMovementRow["movement_type"]): string {
     expired: "Expired",
     restock: "Restock",
     opening_balance: "Opening balance",
+    sale_edit_restore: "Sale edit (restore)",
+    sale_edit_deduct: "Sale edit (deduct)",
   };
   return map[t] ?? t;
 }
@@ -249,13 +251,23 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
             const gpUsd = s.gross_profit_usd_cents;
             const gpLegacy = Math.round(s.qty * (s.unit_price_cents - s.unit_cost_cents));
             return (
-              <li key={s.id} className="flex flex-wrap justify-between gap-2 border-b border-white/[0.06] py-2 text-white/75">
+              <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] py-2 text-white/75">
                 <span>
                   {s.qty} × {formatSalonMoney(s.unit_price_cents, s.currency)} · {new Date(s.sold_at).toLocaleString()}
                 </span>
-                <span className="text-white/55">
-                  Rev {formatSalonMoney(rev, s.currency)}
-                  {gpUsd != null ? ` · GP ${formatSalonMoney(gpUsd, "USD")} USD` : ` · GP ${formatSalonMoney(gpLegacy, s.currency)}`}
+                <span className="flex flex-wrap items-center gap-3 text-white/55">
+                  <span>
+                    Rev {formatSalonMoney(rev, s.currency)}
+                    {gpUsd != null ? ` · GP ${formatSalonMoney(gpUsd, "USD")} USD` : ` · GP ${formatSalonMoney(gpLegacy, s.currency)}`}
+                  </span>
+                  {!staff ? (
+                    <Link
+                      href={`/admin/sales/${s.id}/edit`}
+                      className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]"
+                    >
+                      Edit
+                    </Link>
+                  ) : null}
                 </span>
               </li>
             );

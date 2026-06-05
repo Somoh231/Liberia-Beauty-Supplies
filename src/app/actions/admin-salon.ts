@@ -36,6 +36,7 @@ function revalidateSalon() {
   revalidatePath("/admin/services/new");
   revalidatePath("/admin/suppliers");
   revalidatePath("/admin/sales-log");
+  revalidatePath("/admin/sales");
   revalidatePath("/admin/reconcile");
   revalidatePath("/admin/settings");
   revalidatePath("/admin/users");
@@ -410,6 +411,72 @@ export async function createProductSaleAction(input: {
     return { ok: false, error: error.message };
   }
   revalidateSalon();
+  return { ok: true };
+}
+
+export async function editRetailSaleAction(input: {
+  saleId: string;
+  inventoryItemId: string;
+  qty: string;
+  unitPrice: string;
+  currency: SalonCurrency;
+  saleDate: string;
+  customerName?: string | null;
+  notes?: string | null;
+  editReason: string;
+}): Promise<SalonActionResult> {
+  if (!isUuid(input.saleId)) return { ok: false, error: "invalid_id" };
+  if (!isUuid(input.inventoryItemId)) return { ok: false, error: "invalid_item" };
+
+  const ctx = await getAdminContext();
+  const deny = requireManagerOrAbove(ctx);
+  if (deny) return deny;
+
+  const reason = input.editReason?.trim() ?? "";
+  if (reason.length < 3) return { ok: false, error: "edit_reason_required" };
+
+  const qty = parseQty(input.qty);
+  if (qty == null || qty <= 0) return { ok: false, error: "invalid_qty" };
+
+  const unitPrice = parseMoneyToCents(input.unitPrice);
+  if (unitPrice == null) return { ok: false, error: "invalid_price" };
+
+  const d = input.saleDate?.trim();
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, error: "invalid_date" };
+
+  const cur = normalizeCurrency(input.currency);
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("admin_edit_retail_sale", {
+    p_payload: {
+      sale_id: input.saleId,
+      inventory_item_id: input.inventoryItemId,
+      qty,
+      unit_price_cents: unitPrice,
+      currency: cur,
+      sale_date: d,
+      customer_name: input.customerName?.trim() || null,
+      notes: input.notes?.trim() || null,
+      edit_reason: reason,
+    },
+  });
+
+  if (error) {
+    logSalonAdminSupabaseFailure("rpc:admin_edit_retail_sale", error, {
+      userId: ctx!.user.id,
+      role: ctx!.salonRole,
+      saleId: input.saleId,
+    });
+    const msg = error.message ?? "update_failed";
+    if (msg.includes("insufficient_stock")) return { ok: false, error: "insufficient_stock" };
+    if (msg.includes("edit_reason_required")) return { ok: false, error: "edit_reason_required" };
+    if (msg.includes("forbidden") || msg.includes("42501")) return { ok: false, error: "forbidden_manager_required" };
+    return { ok: false, error: msg };
+  }
+
+  revalidateSalon();
+  revalidatePath(`/admin/sales/${input.saleId}/edit`);
+  revalidatePath(`/admin/inventory/${input.inventoryItemId}`);
   return { ok: true };
 }
 

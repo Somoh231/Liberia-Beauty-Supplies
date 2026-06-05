@@ -2,7 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { NewWeeklySalesReportForm } from "@/components/admin/weekly-sales-log-new-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchWeeklyReports, fetchSaleLogAnalytics, type CurrencyTotals } from "@/lib/admin/salon-queries";
+import {
+  fetchWeeklyReports,
+  fetchSaleLogAnalytics,
+  fetchRetailSalesRecent,
+  fetchSpaceLeasePayments,
+  type CurrencyTotals,
+} from "@/lib/admin/salon-queries";
+import { RecentRetailSalesPanel } from "@/components/admin/recent-retail-sales-panel";
+import { SpaceLeasePanel } from "@/components/admin/space-lease-panel";
 import { formatSalonMoney } from "@/lib/admin/salon-format";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 
@@ -54,7 +62,13 @@ export default async function AdminSalesLogIndexPage() {
   const ctx = await requireAdminContext();
   const staff = isSalonStaffRole(ctx.roleSlug);
   const supabase = await createSupabaseServerClient();
-  const [reports, analytics] = await Promise.all([fetchWeeklyReports(supabase), fetchSaleLogAnalytics(supabase)]);
+  const canManage = ctx.isManagerOrAbove;
+  const [reports, analytics, recentSales, spaceLeaseRows] = await Promise.all([
+    fetchWeeklyReports(supabase),
+    fetchSaleLogAnalytics(supabase),
+    fetchRetailSalesRecent(supabase, 40),
+    fetchSpaceLeasePayments(supabase, 60),
+  ]);
 
   const trend = analytics.dailyUsd.slice(-14);
   const maxBar = Math.max(1, ...trend.map((d) => d.combinedUsdCents));
@@ -68,7 +82,7 @@ export default async function AdminSalesLogIndexPage() {
         </p>
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <PeriodNativeCard
           title="This week (USD equiv.)"
           retailUsd={analytics.weekRetailUsdCents}
@@ -76,6 +90,11 @@ export default async function AdminSalesLogIndexPage() {
           retailNative={analytics.weekNative.retail}
           serviceNative={analytics.weekNative.service}
         />
+        <div className="admin-card p-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Week · rental / space</p>
+          <p className="mt-2 text-lg text-white">{formatSalonMoney(analytics.weekRentalUsdCents, "USD")}</p>
+          <p className="mt-1 text-[11px] text-white/40">Operating revenue — not retail gross profit</p>
+        </div>
         <PeriodNativeCard
           title="This month (USD equiv.)"
           retailUsd={analytics.monthRetailUsdCents}
@@ -113,7 +132,20 @@ export default async function AdminSalesLogIndexPage() {
             {formatSalonMoney(analytics.ytdRetailUsdCents + analytics.ytdServiceUsdCents, "USD")}
           </p>
         </div>
+        <div className="admin-card p-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Month · rental / space</p>
+          <p className="mt-2 text-lg text-white">{formatSalonMoney(analytics.monthRentalUsdCents, "USD")}</p>
+        </div>
       </div>
+
+      <SpaceLeasePanel
+        rows={spaceLeaseRows}
+        canManage={canManage}
+        weekRentalUsdCents={analytics.weekRentalUsdCents}
+        monthRentalUsdCents={analytics.monthRentalUsdCents}
+      />
+
+      <RecentRetailSalesPanel sales={recentSales} canEdit={canManage} />
 
       <section className="admin-card p-6">
         <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Revenue trend (14 days, USD)</h2>

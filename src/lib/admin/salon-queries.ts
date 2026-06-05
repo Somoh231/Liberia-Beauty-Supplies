@@ -1122,7 +1122,8 @@ export type InventoryMovementType =
   | "restock"
   | "opening_balance"
   | "sale_edit_restore"
-  | "sale_edit_deduct";
+  | "sale_edit_deduct"
+  | "catalog_reset";
 
 export type InventoryMovementRow = {
   id: string;

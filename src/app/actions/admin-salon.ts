@@ -468,8 +468,15 @@ export async function editRetailSaleAction(input: {
       saleId: input.saleId,
     });
     const msg = error.message ?? "update_failed";
+    if (error.code === "PGRST202" || msg.includes("admin_edit_retail_sale")) {
+      return { ok: false, error: "migration_required" };
+    }
+    if (msg.includes("inventory_movements_movement_type_check") || msg.includes("sale_edit_restore")) {
+      return { ok: false, error: "migration_required" };
+    }
     if (msg.includes("insufficient_stock")) return { ok: false, error: "insufficient_stock" };
     if (msg.includes("edit_reason_required")) return { ok: false, error: "edit_reason_required" };
+    if (msg.includes("not_found") || msg.includes("invalid_sale_id")) return { ok: false, error: "not_found" };
     if (msg.includes("forbidden") || msg.includes("42501")) return { ok: false, error: "forbidden_manager_required" };
     return { ok: false, error: msg };
   }

@@ -18,6 +18,9 @@ function errMsg(code: string): string {
     invalid_price: "Invalid unit price.",
     invalid_date: "Invalid sale date.",
     forbidden_manager_required: "Only managers and owners can edit sales.",
+    migration_required:
+      "Sale edit is not available until migration 20260523120000_sales_edit_and_space_lease.sql is applied on Supabase.",
+    not_found: "Sale or product not found.",
   };
   return map[code] ?? code.replace(/_/g, " ");
 }

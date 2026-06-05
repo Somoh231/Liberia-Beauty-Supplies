@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { SalonSaleEditForm } from "@/components/admin/salon-sale-edit-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchInventoryProducts, fetchRetailSaleById } from "@/lib/admin/salon-queries";
+import { fetchInventoryItem, fetchInventoryProducts, fetchRetailSaleById } from "@/lib/admin/salon-queries";
 import { requireAdminContext } from "@/lib/auth/admin-context";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +28,13 @@ export default async function AdminSaleEditPage({ params }: Props) {
 
   if (!sale) notFound();
 
+  const activeItems = items.filter((i) => i.active);
+  const saleLineItem = await fetchInventoryItem(supabase, sale.inventory_item_id);
+  const pickerItems =
+    saleLineItem && !activeItems.some((i) => i.id === saleLineItem.id)
+      ? [saleLineItem, ...activeItems]
+      : activeItems;
+
   return (
     <div className="mx-auto max-w-3xl space-y-6 pb-10">
       <Link href="/admin/sales-log" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--admin-accent)]">
@@ -39,7 +46,7 @@ export default async function AdminSaleEditPage({ params }: Props) {
           {sale.product_name} · logged {new Date(sale.sold_at).toLocaleString()}
         </p>
       </header>
-      <SalonSaleEditForm sale={sale} items={items.filter((i) => i.active)} />
+      <SalonSaleEditForm sale={sale} items={pickerItems} />
     </div>
   );
 }

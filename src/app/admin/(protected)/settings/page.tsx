@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { InventoryCatalogResetPanel } from "@/components/admin/inventory-catalog-reset-panel";
 import { OperationalSettingsForm } from "@/components/admin/operational-settings-form";
 import { requireAdminContext } from "@/lib/auth/admin-context";
 import { fetchOperationalSettings } from "@/lib/admin/salon-queries";
@@ -26,6 +27,7 @@ export default async function AdminOperationalSettingsPage() {
         <p className="mt-1 text-sm text-white/50">Central FX rates and warning thresholds — minimal controls for daily ops.</p>
       </div>
       <OperationalSettingsForm row={row} />
+      {ctx.isOwner ? <InventoryCatalogResetPanel /> : null}
     </div>
   );
 }

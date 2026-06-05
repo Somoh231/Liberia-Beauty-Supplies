@@ -35,6 +35,7 @@ function movementTypeLabel(t: InventoryMovementRow["movement_type"]): string {
     opening_balance: "Opening balance",
     sale_edit_restore: "Sale edit (restore)",
     sale_edit_deduct: "Sale edit (deduct)",
+    catalog_reset: "Catalog reset",
   };
   return map[t] ?? t;
 }

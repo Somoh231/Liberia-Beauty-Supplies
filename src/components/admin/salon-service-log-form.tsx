@@ -146,7 +146,7 @@ export function SalonServiceLogForm({ items }: { items: InventoryItemRow[] }) {
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-full bg-[var(--admin-accent)] px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-black disabled:opacity-50 sm:w-auto"
+        className="admin-btn-primary w-full rounded-full px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] disabled:opacity-50 sm:w-auto"
       >
         {pending ? "Saving…" : "Log service"}
       </button>

@@ -160,14 +160,14 @@ export function SpaceLeasePanel({
             <button
               type="submit"
               disabled={pending}
-              className="rounded-full bg-[var(--admin-accent)] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black disabled:opacity-50"
+              className="admin-btn-primary rounded-full px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] disabled:opacity-50"
             >
               {pending ? "Saving…" : editingId ? "Update" : "Add payment"}
             </button>
             {editingId ? (
               <button
                 type="button"
-                className="rounded-full border border-white/15 px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/60"
+                className="admin-btn-secondary rounded-full px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.12em]"
                 onClick={resetForm}
               >
                 Cancel edit

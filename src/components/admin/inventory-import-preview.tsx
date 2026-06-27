@@ -113,13 +113,13 @@ export function InventoryImportPreviewPanel() {
               name="workbook"
               accept=".xlsx,.xls"
               required
-              className="mt-1 w-full rounded-xl border border-white/12 bg-black/30 px-3 py-2.5 text-sm text-white file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--admin-accent)] file:px-3 file:py-1 file:text-[10px] file:font-semibold file:uppercase file:text-black"
+              className="mt-1 w-full rounded-xl border border-white/12 bg-black/30 px-3 py-2.5 text-sm text-white file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--admin-pink)] file:px-3 file:py-1 file:text-[10px] file:font-semibold file:uppercase file:text-white"
             />
           </label>
           <button
             type="submit"
             disabled={pending}
-            className="rounded-full bg-[var(--admin-accent)] px-6 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black disabled:opacity-50"
+            className="admin-btn-primary rounded-full px-6 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] disabled:opacity-50"
           >
             {pending ? "Parsing…" : "Parse & preview"}
           </button>
@@ -262,7 +262,7 @@ export function InventoryImportPreviewPanel() {
                   setErr(null);
                   setConfirmOpen(true);
                 }}
-                className="mt-4 rounded-full bg-[var(--admin-accent)] px-6 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-black disabled:cursor-not-allowed disabled:opacity-40"
+                className="admin-btn-primary mt-4 rounded-full px-6 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Review & commit import
               </button>
@@ -288,7 +288,7 @@ export function InventoryImportPreviewPanel() {
                         if (!res.ok) setErr(res.error.replace(/_/g, " "));
                       });
                     }}
-                    className="rounded-full bg-[var(--admin-accent)] px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-black disabled:opacity-50"
+                    className="admin-btn-primary rounded-full px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] disabled:opacity-50"
                   >
                     {committing ? "Importing…" : "Confirm import"}
                   </button>
@@ -296,7 +296,7 @@ export function InventoryImportPreviewPanel() {
                     type="button"
                     disabled={committing}
                     onClick={() => setConfirmOpen(false)}
-                    className="rounded-full border border-white/15 px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/55"
+                    className="admin-btn-secondary rounded-full px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.12em]"
                   >
                     Cancel
                   </button>

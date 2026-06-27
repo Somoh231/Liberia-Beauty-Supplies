@@ -68,12 +68,12 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
   const st = item.stock_status as StockStatus | null;
   const badgeCls =
     st === "in_stock"
-      ? "bg-emerald-500/15 text-emerald-200 ring-emerald-500/30"
+      ? "admin-badge-active"
       : st === "low_stock"
-        ? "bg-amber-500/15 text-amber-100 ring-amber-500/35"
+        ? "admin-badge-low"
         : st === "out_of_stock"
-          ? "bg-red-500/15 text-red-100 ring-red-500/35"
-          : "bg-white/5 text-white/50 ring-white/10";
+          ? "admin-badge-out"
+          : "text-white/50";
   const badgeLabel =
     st === "in_stock" ? "In stock" : st === "low_stock" ? "Low stock" : st === "out_of_stock" ? "Out of stock" : "—";
 
@@ -103,14 +103,7 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
           <p className="text-xs font-mono text-white/50">{item.product_code}</p>
           <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">{item.product_name}</h1>
         </div>
-        <span
-          className={cn(
-            "inline-flex w-fit rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-wide ring-1",
-            badgeCls,
-          )}
-        >
-          {badgeLabel}
-        </span>
+        <span className={cn("admin-badge w-fit uppercase tracking-wide", badgeCls)}>{badgeLabel}</span>
       </div>
 
       <section className="admin-card space-y-4 p-6 text-sm">

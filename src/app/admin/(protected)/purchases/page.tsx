@@ -29,7 +29,7 @@ export default async function AdminPurchasesPage() {
         </div>
         <Link
           href="/admin/purchases/new"
-          className="inline-flex min-h-[2.75rem] items-center justify-center rounded-full bg-[var(--admin-accent)] px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black sm:min-h-0"
+          className="admin-btn-primary inline-flex min-h-[2.75rem] items-center justify-center rounded-full px-5 text-[10px] font-semibold uppercase tracking-[0.14em] sm:min-h-0"
         >
           New purchase
         </Link>
@@ -52,7 +52,9 @@ export default async function AdminPurchasesPage() {
                 <td className="px-4 py-3 text-white/80">{p.purchase_date}</td>
                 <td className="px-4 py-3 text-white">{supplierName[p.supplier_id] ?? "—"}</td>
                 <td className="px-4 py-3">
-                  <span className={p.status === "received" ? "text-emerald-300/90" : "text-amber-200/90"}>{p.status}</span>
+                  <span className={`admin-badge uppercase tracking-wide ${p.status === "received" ? "admin-badge-active" : "admin-badge-info"}`}>
+                    {p.status}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-white/60">{p.currency}</td>
                 <td className="px-4 py-3 text-right">

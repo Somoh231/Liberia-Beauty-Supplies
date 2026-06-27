@@ -75,7 +75,7 @@ export function InventoryCatalogResetPanel() {
       <button
         type="button"
         disabled={pending || confirmation !== CONFIRM_PHRASE || reason.trim().length < 3}
-        className="rounded-xl border border-red-500/40 bg-red-500/15 px-4 py-2.5 text-sm font-medium text-red-100 transition hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+        className="admin-btn-danger rounded-xl px-4 py-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40"
         onClick={() => {
           setErr(null);
           setOk(false);

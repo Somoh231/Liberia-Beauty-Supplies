@@ -353,26 +353,26 @@ export default async function AdminDashboardPage() {
           <div className="flex flex-wrap gap-2 pb-4">
             <Link
               href="/admin/sales/new"
-              className="inline-flex min-h-[2.75rem] items-center rounded-full bg-[var(--admin-accent)] px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black"
+              className="admin-btn-primary inline-flex min-h-[2.75rem] items-center rounded-full px-5 text-[10px] font-semibold uppercase tracking-[0.14em]"
             >
               Sale
             </Link>
             <Link
               href="/admin/services/new"
-              className="inline-flex min-h-[2.75rem] items-center rounded-full border border-white/18 px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85"
+              className="admin-btn-secondary inline-flex min-h-[2.75rem] items-center rounded-full px-5 text-[10px] font-semibold uppercase tracking-[0.14em]"
             >
               Service
             </Link>
             <Link
               href="/admin/sales-log"
-              className="inline-flex min-h-[2.75rem] items-center rounded-full border border-white/18 px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85"
+              className="admin-btn-secondary inline-flex min-h-[2.75rem] items-center rounded-full px-5 text-[10px] font-semibold uppercase tracking-[0.14em]"
             >
               Sale log
             </Link>
             {!staff ? (
               <Link
                 href="/admin/purchases/new"
-                className="inline-flex min-h-[2.75rem] items-center rounded-full border border-white/18 px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85"
+                className="admin-btn-secondary inline-flex min-h-[2.75rem] items-center rounded-full px-5 text-[10px] font-semibold uppercase tracking-[0.14em]"
               >
                 Restock
               </Link>

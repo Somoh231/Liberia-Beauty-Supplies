@@ -34,7 +34,7 @@ export default function AdminInventoryError({ error, reset }: { error: Error & {
           <button
             type="button"
             onClick={() => reset()}
-            className="rounded-lg border border-[var(--admin-accent)]/45 bg-[var(--admin-accent)]/10 px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--admin-accent)] transition hover:bg-[var(--admin-accent)]/20"
+            className="admin-btn-primary rounded-lg px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]"
           >
             Try again
           </button>

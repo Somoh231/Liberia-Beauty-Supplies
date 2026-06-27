@@ -52,7 +52,7 @@ export function AdminChrome({
   const extraLinks = [...ownerExtras, ...opsExtras];
 
   return (
-    <header className="sticky top-0 z-50 border-b border-[var(--admin-line)] bg-[#060607]/72 text-[var(--admin-fg)] backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-[#060607]/55 print:hidden">
+    <header className="sticky top-0 z-50 border-b border-[var(--admin-line)] bg-[#0f0f12]/78 text-[var(--admin-fg)] backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-[#0f0f12]/62 print:hidden">
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[var(--admin-accent)]/35 to-transparent"
         aria-hidden
@@ -61,9 +61,10 @@ export function AdminChrome({
         <div className="flex items-center gap-4">
           <Link
             href="/admin"
-            className="font-[family-name:var(--font-display)] text-[1.35rem] font-medium tracking-tight text-white transition duration-200 [transition-timing-function:var(--ease-out)] hover:text-[var(--admin-accent)]"
+            className="font-[family-name:var(--font-display)] text-[1.2rem] font-semibold uppercase leading-none tracking-[0.14em] transition duration-200 [transition-timing-function:var(--ease-out)]"
           >
-            Salon
+            <span className="text-[var(--admin-pink)]">Liberia</span>{" "}
+            <span className="text-[var(--admin-gold)]">Beauty</span>
           </Link>
           <span className="hidden h-7 w-px bg-gradient-to-b from-transparent via-[var(--admin-line)] to-transparent sm:block" aria-hidden />
           <div className="hidden min-w-0 text-xs sm:block">
@@ -91,7 +92,7 @@ export function AdminChrome({
                 href={item.href}
                 className={cn(
                   "rounded-full px-3.5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-fg-muted)] transition duration-200 [transition-timing-function:var(--ease-out)] hover:bg-white/[0.06] hover:text-[var(--admin-fg)] active:scale-[0.98]",
-                  active && "bg-white/[0.09] text-[var(--admin-fg)] ring-1 ring-[var(--admin-line-bright)]",
+                  active && "bg-[var(--admin-accent-soft)] text-[var(--admin-fg)] ring-1 ring-[var(--admin-line-bright)]",
                 )}
               >
                 {item.label}
@@ -107,8 +108,8 @@ export function AdminChrome({
                 href={item.href}
                 className={cn(
                   "rounded-full px-3.5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-fg-muted)] transition duration-200 [transition-timing-function:var(--ease-out)] hover:bg-white/[0.06] hover:text-[var(--admin-fg)] active:scale-[0.98]",
-                  active && "bg-white/[0.09] text-[var(--admin-fg)] ring-1 ring-[var(--admin-line-bright)]",
-                  ownerOnly && !active && "text-[var(--admin-accent)]/75",
+                  active && "bg-[var(--admin-accent-soft)] text-[var(--admin-fg)] ring-1 ring-[var(--admin-line-bright)]",
+                  ownerOnly && !active && "text-[var(--admin-gold)]/85",
                 )}
               >
                 {item.label}

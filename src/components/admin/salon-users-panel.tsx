@@ -166,10 +166,8 @@ function UsersPanelMain(props: {
                 <td className="px-4 py-3">
                   <span
                     className={cn(
-                      "inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1",
-                      u.active
-                        ? "bg-emerald-500/15 text-emerald-200 ring-emerald-500/30"
-                        : "bg-red-500/15 text-red-100 ring-red-500/35",
+                      "admin-badge uppercase tracking-wide",
+                      u.active ? "admin-badge-active" : "admin-badge-out",
                     )}
                   >
                     {u.active ? "Active" : "Inactive"}
@@ -265,7 +263,7 @@ function UsersPanelCreate({
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-full bg-[var(--admin-accent)] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black disabled:opacity-50"
+        className="admin-btn-primary w-full rounded-full px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] disabled:opacity-50"
       >
         {pending ? "Creating…" : "Create account"}
       </button>
@@ -301,7 +299,7 @@ function UserRowActions({
       <button
         type="button"
         disabled={pending || u.id === currentUserId}
-        className="rounded-full border border-white/15 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/70 hover:bg-white/[0.06] disabled:opacity-40"
+        className="admin-btn-secondary rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] disabled:opacity-40"
         onClick={() => {
           setRowErr(null);
           start(async () => {
@@ -319,7 +317,7 @@ function UserRowActions({
       <button
         type="button"
         disabled={pending}
-        className="rounded-full border border-[var(--admin-accent)]/35 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)] hover:bg-[var(--admin-accent-dim)] disabled:opacity-40"
+        className="admin-btn-secondary rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] disabled:opacity-40"
         onClick={() => setResetUserId(resetUserId === u.id ? null : u.id)}
       >
         Reset password

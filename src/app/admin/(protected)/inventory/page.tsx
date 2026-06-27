@@ -13,28 +13,17 @@ export const dynamic = "force-dynamic";
 type Search = { q?: string; status?: string; page?: string };
 
 function statusBadge(status: StockStatus | null) {
-  const label =
-    status === "in_stock" ? "In stock" : status === "low_stock" ? "Low stock" : status === "out_of_stock" ? "Out of stock" : "—";
-  const cls =
-    status === "in_stock"
-      ? "bg-emerald-500/15 text-emerald-200 ring-emerald-500/30"
-      : status === "low_stock"
-        ? "bg-amber-500/15 text-amber-100 ring-amber-500/35"
-        : status === "out_of_stock"
-          ? "bg-red-500/15 text-red-100 ring-red-500/35"
-          : "bg-white/5 text-white/50 ring-white/10";
-  return (
-    <span className={cn("inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1", cls)}>
-      {label}
-    </span>
-  );
+  if (status === "in_stock") return <span className="admin-badge admin-badge-active uppercase tracking-wide">In stock</span>;
+  if (status === "low_stock") return <span className="admin-badge admin-badge-low uppercase tracking-wide">Low stock</span>;
+  if (status === "out_of_stock") return <span className="admin-badge admin-badge-out uppercase tracking-wide">Out of stock</span>;
+  return <span className="admin-badge uppercase tracking-wide text-white/50">—</span>;
 }
 
-function marginEconomyHint(m: number | null): { label: string; cls: string } | null {
+function marginEconomyHint(m: number | null): { label: string; badge: string } | null {
   if (m == null || !Number.isFinite(m)) return null;
-  if (m < 0) return { label: "Sub cost", cls: "border-red-500/35 text-red-100/90 bg-red-500/[0.08]" };
-  if (m < 12) return { label: "Tight", cls: "border-amber-500/30 text-amber-100/85 bg-amber-500/[0.07]" };
-  if (m >= 35) return { label: "Solid", cls: "border-emerald-500/30 text-emerald-100/90 bg-emerald-500/[0.08]" };
+  if (m < 0) return { label: "Sub cost", badge: "admin-badge-out" };
+  if (m < 12) return { label: "Tight", badge: "admin-badge-low" };
+  if (m >= 35) return { label: "Solid", badge: "admin-badge-active" };
   return null;
 }
 
@@ -107,7 +96,7 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
           {!staff ? (
             <Link
               href="/admin/inventory/new"
-              className="inline-flex min-h-[2.75rem] items-center justify-center rounded-full bg-[var(--admin-accent)] px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black sm:min-h-0"
+              className="admin-btn-primary inline-flex min-h-[2.75rem] items-center justify-center rounded-full px-5 text-[10px] font-semibold uppercase tracking-[0.14em] sm:min-h-0"
             >
               Add product
             </Link>
@@ -115,7 +104,7 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
           {!staff ? (
             <Link
               href="/admin/purchases/new"
-              className="inline-flex min-h-[2.75rem] items-center justify-center rounded-full border border-white/18 px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/85 sm:min-h-0"
+              className="admin-btn-secondary inline-flex min-h-[2.75rem] items-center justify-center rounded-full px-5 text-[10px] font-semibold uppercase tracking-[0.14em] sm:min-h-0"
             >
               Supplier restock
             </Link>
@@ -123,7 +112,7 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
           {canImport ? (
             <Link
               href="/admin/inventory/import"
-              className="inline-flex min-h-[2.75rem] items-center justify-center rounded-full border border-violet-500/35 bg-violet-500/[0.08] px-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-100/90 sm:min-h-0"
+              className="admin-btn-secondary inline-flex min-h-[2.75rem] items-center justify-center rounded-full px-5 text-[10px] font-semibold uppercase tracking-[0.14em] sm:min-h-0"
             >
               Import preview
             </Link>
@@ -157,7 +146,7 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
           />
           <button
             type="submit"
-            className="rounded-full border border-white/18 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/85"
+            className="admin-btn-secondary rounded-full px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em]"
           >
             Search
           </button>
@@ -205,14 +194,10 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
                   <td className="px-3 py-3 text-white">
                     <span className="font-medium">{row.product_name}</span>
                     {row.stock_status === "low_stock" ? (
-                      <span className="ml-1.5 inline-flex rounded-full border border-amber-500/35 bg-amber-500/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-100/85">
-                        Low
-                      </span>
+                      <span className="admin-badge admin-badge-low ml-1.5 uppercase tracking-wide">Low</span>
                     ) : null}
                     {row.stock_status === "out_of_stock" ? (
-                      <span className="ml-1.5 inline-flex rounded-full border border-red-500/30 bg-red-500/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-red-100/85">
-                        Out
-                      </span>
+                      <span className="admin-badge admin-badge-out ml-1.5 uppercase tracking-wide">Out</span>
                     ) : null}
                     <span className="ml-2 font-mono text-[10px] text-white/35">{row.product_code}</span>
                     {!row.active ? <span className="ml-2 text-[10px] uppercase text-white/35">inactive</span> : null}
@@ -240,14 +225,7 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
                       {(() => {
                         const hint = marginEconomyHint(margin);
                         return hint ? (
-                          <span
-                            className={cn(
-                              "rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
-                              hint.cls,
-                            )}
-                          >
-                            {hint.label}
-                          </span>
+                          <span className={cn("admin-badge uppercase tracking-wide", hint.badge)}>{hint.label}</span>
                         ) : null;
                       })()}
                     </div>

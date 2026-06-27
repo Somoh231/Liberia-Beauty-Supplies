@@ -67,7 +67,7 @@ export function SalonSupplierCreateForm() {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-full bg-[var(--admin-accent)] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black disabled:opacity-50"
+        className="admin-btn-primary rounded-full px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] disabled:opacity-50"
       >
         {pending ? "…" : "Add"}
       </button>

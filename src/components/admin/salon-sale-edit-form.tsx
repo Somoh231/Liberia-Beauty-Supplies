@@ -149,7 +149,7 @@ export function SalonSaleEditForm({
         <button
           type="submit"
           disabled={pending || !itemId}
-          className="min-h-[2.75rem] rounded-full bg-[var(--admin-accent)] px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-black disabled:opacity-50"
+          className="admin-btn-primary min-h-[2.75rem] rounded-full px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] disabled:opacity-50"
         >
           {pending ? "Saving…" : "Save sale changes"}
         </button>

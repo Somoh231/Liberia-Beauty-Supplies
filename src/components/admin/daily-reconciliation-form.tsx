@@ -93,7 +93,7 @@ export function DailyReconciliationForm(props: {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-full bg-[var(--admin-accent)] px-6 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-black disabled:opacity-50"
+        className="admin-btn-primary rounded-full px-6 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] disabled:opacity-50"
       >
         {pending ? "Saving…" : "Save reconciliation"}
       </button>

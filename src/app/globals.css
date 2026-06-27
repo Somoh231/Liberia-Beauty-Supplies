@@ -249,6 +249,59 @@
   transform: scale(0.98);
 }
 
+/* Shell — sidebar nav items */
+[data-app="admin"] .admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: var(--radius-lg);
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  color: var(--admin-fg-muted);
+  transition:
+    background-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out);
+}
+
+[data-app="admin"] .admin-nav-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--admin-fg);
+}
+
+[data-app="admin"] .admin-nav-item-active {
+  background-color: var(--admin-accent-soft);
+  color: var(--admin-fg);
+  box-shadow: inset 2px 0 0 var(--admin-pink);
+}
+
+[data-app="admin"] .admin-nav-item-active:hover {
+  background-color: var(--admin-accent-soft);
+}
+
+/* Shell — header icon buttons */
+[data-app="admin"] .admin-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  height: 2.5rem;
+  width: 2.5rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--admin-border);
+  background: var(--admin-elevated);
+  color: var(--admin-fg-muted);
+  transition:
+    border-color 0.16s var(--ease-out),
+    background-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out);
+}
+
+[data-app="admin"] .admin-icon-btn:hover {
+  color: var(--admin-fg);
+  border-color: color-mix(in srgb, var(--admin-pink) 40%, var(--admin-border));
+  background: rgba(255, 255, 255, 0.04);
+}
+
 /* Status badges — Active (green), Low stock (gold), Out of stock (red), Info (blue) */
 [data-app="admin"] .admin-badge {
   display: inline-flex;

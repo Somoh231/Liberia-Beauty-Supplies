@@ -1,22 +1,32 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { requireAdminContext } from "@/lib/auth/admin-context";
-import { AdminChrome } from "@/components/admin/admin-chrome";
+import { AdminShell } from "@/components/admin/admin-shell";
 
 export const dynamic = "force-dynamic";
 
+const LOGO_PUBLIC_PATH = "/brand/liberia-beauty-logo.png";
+
+function resolveLogoSrc(): string | null {
+  try {
+    return existsSync(join(process.cwd(), "public", "brand", "liberia-beauty-logo.png")) ? LOGO_PUBLIC_PATH : null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function AdminProtectedLayout({ children }: { children: React.ReactNode }) {
   const ctx = await requireAdminContext();
+  const logoSrc = resolveLogoSrc();
 
   return (
-    <div className="flex min-h-full flex-col">
-      <AdminChrome
-        email={ctx.user.email ?? ""}
-        roleSlug={ctx.roleSlug}
-        showOpsTrustLinks={ctx.isManagerOrAbove}
-        showUsersLink={ctx.isOwner}
-      />
-      <main className="flex-1 scroll-smooth px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-8 sm:px-8 sm:pb-10 sm:pt-12 lg:px-10">
-        {children}
-      </main>
-    </div>
+    <AdminShell
+      email={ctx.user.email ?? ""}
+      fullName={ctx.fullName}
+      roleSlug={ctx.roleSlug}
+      logoSrc={logoSrc}
+    >
+      {children}
+    </AdminShell>
   );
 }

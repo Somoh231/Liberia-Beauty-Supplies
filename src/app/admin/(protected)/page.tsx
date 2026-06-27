@@ -12,6 +12,7 @@ import {
 import { formatSalonMoney } from "@/lib/admin/salon-format";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 import Link from "next/link";
+import { Boxes, TrendingUp, AlertTriangle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdminDashboardCharts } from "@/components/admin/admin-dashboard-charts";
 
@@ -105,9 +106,9 @@ export default async function AdminDashboardPage() {
       : null;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 pb-10">
+    <div className="space-y-8 pb-4">
       <header className="space-y-2">
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium tracking-tight text-white sm:text-4xl">
+        <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold leading-tight tracking-tight text-white sm:text-[32px]">
           Command center
         </h1>
         <p className="max-w-2xl text-sm text-white/50">Stock, sales, and services at a glance — optimized for daily operations.</p>
@@ -120,7 +121,7 @@ export default async function AdminDashboardPage() {
       ) : null}
       {trust && !err ? (
         <section className="admin-card border border-white/[0.07] bg-white/[0.02] p-4">
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Trust &amp; reconciliation</h2>
+          <h2 className="admin-eyebrow">Trust &amp; reconciliation</h2>
           <ul className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/70">
             <li
               className={cn(
@@ -210,41 +211,57 @@ export default async function AdminDashboardPage() {
             </section>
           ) : null}
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="admin-card p-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Inventory value</p>
-              <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">
-                {formatSalonMoney(rollup.inventoryValueUsdCents, "USD")}
-              </p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="admin-card p-6">
+              <div className="flex items-start justify-between gap-3">
+                <p className="admin-stat-label">Inventory value</p>
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--admin-accent-soft)] text-[var(--admin-pink)]">
+                  <Boxes className="h-[18px] w-[18px]" aria-hidden />
+                </span>
+              </div>
+              <span className="admin-stat-value">{formatSalonMoney(rollup.inventoryValueUsdCents, "USD")}</span>
             </div>
-            <div className="admin-card p-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Low stock</p>
-              <p className="mt-2 font-[family-name:var(--font-display)] text-3xl text-white">{rollup.lowStockCount}</p>
+            <div className="admin-card p-6">
+              <div className="flex items-start justify-between gap-3">
+                <p className="admin-stat-label">Low stock</p>
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-500/12 text-amber-300">
+                  <AlertTriangle className="h-[18px] w-[18px]" aria-hidden />
+                </span>
+              </div>
+              <span className="admin-stat-value">{rollup.lowStockCount}</span>
             </div>
-            <div className="admin-card p-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Out of stock</p>
-              <p className="mt-2 font-[family-name:var(--font-display)] text-3xl text-white">{rollup.outOfStockCount}</p>
+            <div className="admin-card p-6">
+              <div className="flex items-start justify-between gap-3">
+                <p className="admin-stat-label">Out of stock</p>
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-red-500/12 text-red-300">
+                  <XCircle className="h-[18px] w-[18px]" aria-hidden />
+                </span>
+              </div>
+              <span className="admin-stat-value">{rollup.outOfStockCount}</span>
             </div>
-            <div className="admin-card p-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Gross profit (30d)</p>
-              <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-[var(--admin-accent)]">
-                {formatSalonMoney(grossProfit30d, "USD")}
-              </p>
+            <div className="admin-card p-6">
+              <div className="flex items-start justify-between gap-3">
+                <p className="admin-stat-label">Gross profit (30d)</p>
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--admin-accent-soft)] text-[var(--admin-gold)]">
+                  <TrendingUp className="h-[18px] w-[18px]" aria-hidden />
+                </span>
+              </div>
+              <span className="admin-stat-value text-[var(--admin-accent)]">{formatSalonMoney(grossProfit30d, "USD")}</span>
             </div>
           </div>
 
           {chartPayload ? <AdminDashboardCharts data={chartPayload} /> : null}
 
           {saleLogAnalytics ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="admin-card p-5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Weekly rental income</p>
-                <p className="mt-2 text-xl text-white">{formatSalonMoney(saleLogAnalytics.weekRentalUsdCents, "USD")}</p>
-                <p className="mt-1 text-[11px] text-white/40">Space lease — operating revenue</p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="admin-card p-6">
+                <p className="admin-stat-label">Weekly rental income</p>
+                <span className="admin-stat-value">{formatSalonMoney(saleLogAnalytics.weekRentalUsdCents, "USD")}</span>
+                <p className="admin-stat-hint">Space lease — operating revenue</p>
               </div>
-              <div className="admin-card p-5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Month rental income</p>
-                <p className="mt-2 text-xl text-white">{formatSalonMoney(saleLogAnalytics.monthRentalUsdCents, "USD")}</p>
+              <div className="admin-card p-6">
+                <p className="admin-stat-label">Month rental income</p>
+                <span className="admin-stat-value">{formatSalonMoney(saleLogAnalytics.monthRentalUsdCents, "USD")}</span>
                 <Link href="/admin/sales-log" className="mt-2 inline-block text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]">
                   Sale log →
                 </Link>
@@ -252,12 +269,12 @@ export default async function AdminDashboardPage() {
             </div>
           ) : null}
 
-          <section className="admin-card p-5">
-            <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Today&apos;s revenue</h2>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <section className="admin-card p-6">
+            <h2 className="admin-eyebrow">Today&apos;s revenue</h2>
+            <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <p className="text-xs text-white/45">Retail (USD equiv.)</p>
-                <p className="mt-1 text-xl text-white">{formatSalonMoney(today.retailUsdCents, "USD")}</p>
+                <p className="mt-1 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(today.retailUsdCents, "USD")}</p>
                 {today.retailNative.USD > 0 || today.retailNative.LRD > 0 ? (
                   <p className="mt-1 text-[11px] text-white/40">
                     {today.retailNative.USD > 0 ? formatSalonMoney(today.retailNative.USD, "USD") : null}
@@ -268,7 +285,7 @@ export default async function AdminDashboardPage() {
               </div>
               <div>
                 <p className="text-xs text-white/45">Services (USD equiv.)</p>
-                <p className="mt-1 text-xl text-white">{formatSalonMoney(today.serviceUsdCents, "USD")}</p>
+                <p className="mt-1 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(today.serviceUsdCents, "USD")}</p>
                 {today.serviceNative.USD > 0 || today.serviceNative.LRD > 0 ? (
                   <p className="mt-1 text-[11px] text-white/40">
                     {today.serviceNative.USD > 0 ? formatSalonMoney(today.serviceNative.USD, "USD") : null}
@@ -279,18 +296,18 @@ export default async function AdminDashboardPage() {
               </div>
               <div>
                 <p className="text-xs text-white/45">Month (USD equiv.)</p>
-                <p className="mt-1 text-xl text-white">{formatSalonMoney(monthCombined, "USD")}</p>
+                <p className="mt-1 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(monthCombined, "USD")}</p>
               </div>
               <div>
                 <p className="text-xs text-white/45">YTD (USD equiv.)</p>
-                <p className="mt-1 text-xl text-white">{formatSalonMoney(ytdCombined, "USD")}</p>
+                <p className="mt-1 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(ytdCombined, "USD")}</p>
               </div>
             </div>
           </section>
 
           <div className="grid gap-6 lg:grid-cols-2">
             <section className="admin-card p-6">
-              <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Best-selling products (YTD)</h2>
+              <h2 className="admin-eyebrow">Best-selling products (YTD)</h2>
               <ul className="mt-4 space-y-2 text-sm">
                 {topProducts.length === 0 ? <li className="text-white/40">No retail sales yet.</li> : null}
                 {topProducts.map((p) => (
@@ -305,7 +322,7 @@ export default async function AdminDashboardPage() {
             </section>
 
             <section className="admin-card p-6">
-              <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Top services (YTD)</h2>
+              <h2 className="admin-eyebrow">Top services (YTD)</h2>
               <ul className="mt-4 space-y-2 text-sm">
                 {topServices.length === 0 ? <li className="text-white/40">No service entries yet.</li> : null}
                 {topServices.map((s) => (
@@ -321,7 +338,7 @@ export default async function AdminDashboardPage() {
           </div>
 
           <section className="admin-card p-6">
-            <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Top gross margin (inventory)</h2>
+            <h2 className="admin-eyebrow">Top gross margin (inventory)</h2>
             <ul className="mt-4 space-y-2 text-sm">
               {margins.length === 0 ? <li className="text-white/40">Set USD sell prices on inventory to see margins.</li> : null}
               {margins.map((m) => (
@@ -336,7 +353,7 @@ export default async function AdminDashboardPage() {
           </section>
 
           <section className="admin-card p-6">
-            <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Recent activity</h2>
+            <h2 className="admin-eyebrow">Recent activity</h2>
             <ul className="mt-4 space-y-2 text-sm">
               {activity.length === 0 ? <li className="text-white/40">No entries in the last two weeks.</li> : null}
               {activity.map((a, i) => (

@@ -14,11 +14,11 @@ export function BrandLogo({ src, className }: { src?: string | null; className?:
       <div className={className}>
         <Image
           src={src}
-          alt="Liberia Beauty Salon & Supplies"
-          width={220}
-          height={88}
+          alt="Liberian Beauty Salon & Supplies"
+          width={384}
+          height={307}
           priority
-          className="h-auto w-full max-w-[200px] object-contain"
+          className="h-auto w-[180px] object-contain"
         />
       </div>
     );

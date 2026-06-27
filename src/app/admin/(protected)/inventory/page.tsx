@@ -84,10 +84,10 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 pb-12">
+    <div className="space-y-8 pb-4">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
-          <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">Inventory</h1>
+          <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold leading-tight text-white">Inventory</h1>
           <p className="mt-1 text-sm text-white/50">
             Supplier → FX → landed (WAC) → wholesale → retail → margin. Same FX as purchases, sales, and dashboard.
           </p>
@@ -120,18 +120,18 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="admin-card border-emerald-500/20 bg-emerald-500/[0.04] p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/70">In stock</p>
-          <p className="mt-2 font-[family-name:var(--font-display)] text-3xl text-white">{summary.in_stock}</p>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div className="admin-card border-emerald-500/20 bg-emerald-500/[0.04] p-6">
+          <p className="admin-stat-label text-emerald-200/70">In stock</p>
+          <span className="admin-stat-value">{summary.in_stock}</span>
         </div>
-        <div className="admin-card border-amber-500/25 bg-amber-500/[0.05] p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-100/70">Low stock</p>
-          <p className="mt-2 font-[family-name:var(--font-display)] text-3xl text-white">{summary.low_stock}</p>
+        <div className="admin-card border-amber-500/25 bg-amber-500/[0.05] p-6">
+          <p className="admin-stat-label text-amber-100/70">Low stock</p>
+          <span className="admin-stat-value">{summary.low_stock}</span>
         </div>
-        <div className="admin-card border-red-500/25 bg-red-500/[0.05] p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-red-100/70">Out of stock</p>
-          <p className="mt-2 font-[family-name:var(--font-display)] text-3xl text-white">{summary.out_of_stock}</p>
+        <div className="admin-card border-red-500/25 bg-red-500/[0.05] p-6">
+          <p className="admin-stat-label text-red-100/70">Out of stock</p>
+          <span className="admin-stat-value">{summary.out_of_stock}</span>
         </div>
       </div>
 
@@ -160,9 +160,9 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
       </div>
 
       <div className="admin-card admin-x-scroll overflow-x-auto">
-        <table className="w-full min-w-[1120px] text-left text-sm">
+        <table className="admin-data-table min-w-[1120px]">
           <thead>
-            <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/45">
+            <tr>
               <th className="px-3 py-3">Product</th>
               <th className="px-3 py-3">Status</th>
               <th className="px-3 py-3">Qty</th>
@@ -257,7 +257,15 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
             })}
           </tbody>
         </table>
-        {items.length === 0 ? <p className="p-6 text-sm text-white/45">No products match this view.</p> : null}
+        {items.length === 0 ? (
+          <div className="admin-empty">
+            <p className="admin-empty-title">No products to show</p>
+            <p className="admin-empty-text">
+              Nothing matches this filter or search yet. Clear the filters above, or add your first product to start
+              tracking stock, cost, and margin.
+            </p>
+          </div>
+        ) : null}
       </div>
 
       {totalPages > 1 ? (

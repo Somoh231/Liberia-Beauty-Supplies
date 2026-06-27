@@ -115,15 +115,15 @@ function UsersPanelMain(props: {
       {rowErr ? <p className="text-sm text-red-300">{errLabel(rowErr)}</p> : null}
 
       <div className="admin-card overflow-x-auto">
-        <table className="w-full min-w-[720px] text-left text-sm">
+        <table className="admin-data-table min-w-[720px]">
           <thead>
-            <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">
-              <th className="px-4 py-3">User</th>
-              <th className="px-4 py-3">Role</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Created</th>
-              <th className="px-4 py-3">Last login</th>
-              <th className="px-4 py-3">Actions</th>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Last login</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>

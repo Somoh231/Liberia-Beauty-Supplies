@@ -50,10 +50,10 @@ function PeriodNativeCard({
   serviceNative: CurrencyTotals;
 }) {
   return (
-    <div className="admin-card p-5">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">{title}</p>
-      <p className="mt-2 text-xl text-white">{formatSalonMoney(retailUsd + serviceUsd, "USD")}</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-white/40">{nativeLines(retailNative, serviceNative)}</p>
+    <div className="admin-card p-6">
+      <p className="admin-stat-label">{title}</p>
+      <span className="admin-stat-value">{formatSalonMoney(retailUsd + serviceUsd, "USD")}</span>
+      <p className="admin-stat-hint leading-relaxed">{nativeLines(retailNative, serviceNative)}</p>
     </div>
   );
 }
@@ -74,15 +74,15 @@ export default async function AdminSalesLogIndexPage() {
   const maxBar = Math.max(1, ...trend.map((d) => d.combinedUsdCents));
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 pb-12">
+    <div className="space-y-8 pb-4">
       <header className="space-y-2">
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">Sale log</h1>
+        <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold leading-tight text-white">Sale log</h1>
         <p className="max-w-2xl text-sm text-white/50">
           Automatically aggregates daily retail sales from the Sale module and service revenue from the Service module.
         </p>
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <PeriodNativeCard
           title="This week (USD equiv.)"
           retailUsd={analytics.weekRetailUsdCents}
@@ -90,10 +90,10 @@ export default async function AdminSalesLogIndexPage() {
           retailNative={analytics.weekNative.retail}
           serviceNative={analytics.weekNative.service}
         />
-        <div className="admin-card p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Week · rental / space</p>
-          <p className="mt-2 text-lg text-white">{formatSalonMoney(analytics.weekRentalUsdCents, "USD")}</p>
-          <p className="mt-1 text-[11px] text-white/40">Operating revenue — not retail gross profit</p>
+        <div className="admin-card p-6">
+          <p className="admin-stat-label">Week · rental / space</p>
+          <span className="admin-stat-value">{formatSalonMoney(analytics.weekRentalUsdCents, "USD")}</span>
+          <p className="admin-stat-hint">Operating revenue — not retail gross profit</p>
         </div>
         <PeriodNativeCard
           title="This month (USD equiv.)"
@@ -111,30 +111,30 @@ export default async function AdminSalesLogIndexPage() {
         />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="admin-card p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Week · retail only</p>
-          <p className="mt-2 text-lg text-white">{formatSalonMoney(analytics.weekRetailUsdCents, "USD")}</p>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="admin-card p-6">
+          <p className="admin-stat-label">Week · retail only</p>
+          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(analytics.weekRetailUsdCents, "USD")}</p>
         </div>
-        <div className="admin-card p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Week · services only</p>
-          <p className="mt-2 text-lg text-white">{formatSalonMoney(analytics.weekServiceUsdCents, "USD")}</p>
+        <div className="admin-card p-6">
+          <p className="admin-stat-label">Week · services only</p>
+          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(analytics.weekServiceUsdCents, "USD")}</p>
         </div>
-        <div className="admin-card p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Month · combined</p>
-          <p className="mt-2 text-lg text-white">
+        <div className="admin-card p-6">
+          <p className="admin-stat-label">Month · combined</p>
+          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">
             {formatSalonMoney(analytics.monthRetailUsdCents + analytics.monthServiceUsdCents, "USD")}
           </p>
         </div>
-        <div className="admin-card p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">YTD · combined</p>
-          <p className="mt-2 text-lg text-[var(--admin-accent)]">
+        <div className="admin-card p-6">
+          <p className="admin-stat-label">YTD · combined</p>
+          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-[var(--admin-accent)]">
             {formatSalonMoney(analytics.ytdRetailUsdCents + analytics.ytdServiceUsdCents, "USD")}
           </p>
         </div>
-        <div className="admin-card p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Month · rental / space</p>
-          <p className="mt-2 text-lg text-white">{formatSalonMoney(analytics.monthRentalUsdCents, "USD")}</p>
+        <div className="admin-card p-6">
+          <p className="admin-stat-label">Month · rental / space</p>
+          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(analytics.monthRentalUsdCents, "USD")}</p>
         </div>
       </div>
 
@@ -148,7 +148,7 @@ export default async function AdminSalesLogIndexPage() {
       <RecentRetailSalesPanel sales={recentSales} canEdit={canManage} />
 
       <section className="admin-card p-6">
-        <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Revenue trend (14 days, USD)</h2>
+        <h2 className="admin-eyebrow">Revenue trend (14 days, USD)</h2>
         <div className="mt-6 flex h-36 items-end gap-1 sm:gap-1.5">
           {trend.length === 0 ? <p className="text-sm text-white/40">No activity yet this year.</p> : null}
           {trend.map((d) => (
@@ -165,9 +165,9 @@ export default async function AdminSalesLogIndexPage() {
       </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <section className="admin-card overflow-x-auto p-5">
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Top products</h2>
-          <table className="mt-4 w-full text-left text-sm">
+        <section className="admin-card overflow-x-auto p-6">
+          <h2 className="admin-eyebrow">Top products</h2>
+          <table className="admin-data-table mt-2">
             <thead>
               <tr className="border-b border-white/10 text-[10px] uppercase tracking-[0.12em] text-white/40">
                 <th className="py-2">Product</th>
@@ -186,9 +186,9 @@ export default async function AdminSalesLogIndexPage() {
             </tbody>
           </table>
         </section>
-        <section className="admin-card overflow-x-auto p-5">
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Top services</h2>
-          <table className="mt-4 w-full text-left text-sm">
+        <section className="admin-card overflow-x-auto p-6">
+          <h2 className="admin-eyebrow">Top services</h2>
+          <table className="admin-data-table mt-2">
             <thead>
               <tr className="border-b border-white/10 text-[10px] uppercase tracking-[0.12em] text-white/40">
                 <th className="py-2">Service</th>
@@ -209,12 +209,12 @@ export default async function AdminSalesLogIndexPage() {
         </section>
       </div>
 
-      <section className="admin-card overflow-x-auto p-5">
-        <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Daily activity (YTD)</h2>
+      <section className="admin-card overflow-x-auto p-6">
+        <h2 className="admin-eyebrow">Daily activity (YTD)</h2>
         <div className="mt-3 max-h-72 overflow-y-auto">
-          <table className="w-full min-w-[520px] text-left text-sm">
-            <thead className="sticky top-0 bg-[#0c0c0e]">
-              <tr className="border-b border-white/10 text-[10px] uppercase tracking-[0.12em] text-white/40">
+          <table className="admin-data-table min-w-[520px]">
+            <thead className="sticky top-0 bg-[var(--admin-card)]">
+              <tr>
                 <th className="py-2">Day</th>
                 <th className="py-2 text-right">Retail USD</th>
                 <th className="py-2 text-right">Service USD</th>
@@ -256,13 +256,13 @@ export default async function AdminSalesLogIndexPage() {
             <NewWeeklySalesReportForm />
           </div>
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[520px] text-left text-sm">
+            <table className="admin-data-table min-w-[520px]">
               <thead>
-                <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">
-                  <th className="px-4 py-3">Period</th>
-                  <th className="px-4 py-3">Staff on duty</th>
-                  <th className="px-4 py-3">Created</th>
-                  <th className="px-4 py-3"> </th>
+                <tr>
+                  <th>Period</th>
+                  <th>Staff on duty</th>
+                  <th>Created</th>
+                  <th> </th>
                 </tr>
               </thead>
               <tbody>
@@ -285,7 +285,7 @@ export default async function AdminSalesLogIndexPage() {
                 ))}
               </tbody>
             </table>
-            {reports.length === 0 ? <p className="p-4 text-sm text-white/45">No weekly worksheets on file.</p> : null}
+            {reports.length === 0 ? <p className="px-1 py-4 text-sm text-white/45">No weekly worksheets on file.</p> : null}
           </div>
         </details>
       ) : null}

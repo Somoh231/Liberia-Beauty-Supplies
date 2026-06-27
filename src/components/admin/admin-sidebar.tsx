@@ -31,8 +31,8 @@ export function AdminSidebar({
   return (
     <div className="flex h-full flex-col bg-[var(--admin-surface)]">
       {/* Logo */}
-      <div className="flex h-20 shrink-0 items-center px-6">
-        <Link href="/admin" onClick={onNavigate} aria-label="Liberia Beauty — Dashboard">
+      <div className="flex shrink-0 items-center px-6 py-6">
+        <Link href="/admin" onClick={onNavigate} aria-label="Liberian Beauty — Dashboard">
           <BrandLogo src={logoSrc} />
         </Link>
       </div>

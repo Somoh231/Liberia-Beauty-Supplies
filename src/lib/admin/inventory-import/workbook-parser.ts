@@ -8,15 +8,17 @@ import {
 import {
   detectProfileForSheet,
   isEquipmentLumpHeader,
+  parseCatalogNameRow,
   parseRowWithProfile,
 } from "@/lib/admin/inventory-import/profiles";
 import type {
   InventoryImportCategorySummary,
+  InventoryImportMode,
   InventoryImportPreviewReport,
   InventoryImportValidationStatus,
   ParsedInventoryImportRow,
 } from "@/lib/admin/inventory-import/types";
-import { EXPECTED_IMPORT_CATEGORIES } from "@/lib/admin/inventory-import/types";
+import { EXCLUDED_IMPORT_CATEGORIES, EXPECTED_IMPORT_CATEGORIES } from "@/lib/admin/inventory-import/types";
 import {
   getOperationalFx,
   type OperationalFxRates,
@@ -85,6 +87,7 @@ function parseSheetRows(
   sheetName: string,
   matrix: unknown[][],
   fx: OperationalFxRates,
+  mode: InventoryImportMode,
 ): ParsedInventoryImportRow[] {
   const category = sheetToCategory(sheetName);
   let profile = detectProfileForSheet(sheetName);
@@ -105,6 +108,7 @@ function parseSheetRows(
         sectionNote = sheetName === "Hair & Salon Equipment" ? "Pedicure & Manicure equipment" : "Industrial equipment";
       } else if (!isEquipmentLumpHeader(cells)) {
         profile = detectProfileForSheet(sheetName);
+        sectionNote = null;
       }
       continue;
     }
@@ -114,6 +118,20 @@ function parseSheetRows(
     const productName = cells[nameIdx]?.trim() ?? "";
     if (!productName) continue;
     if (/^grand\s*total/i.test(productName)) continue;
+    if (/^\d+(\.\d+)?$/.test(productName)) continue;
+
+    if (mode === "catalog") {
+      const parsed = parseCatalogNameRow(row, {
+        sheet: sheetName,
+        category,
+        rowIndex,
+        fx,
+        sectionNote,
+        profileHint: profile,
+      });
+      if (parsed) out.push(parsed);
+      continue;
+    }
 
     const parsed = parseRowWithProfile(profile, row, {
       sheet: sheetName,
@@ -129,12 +147,14 @@ function parseSheetRows(
 }
 
 /**
- * Phase 1 — parse workbook bytes into preview report. NO database writes.
+ * Parse workbook bytes into preview report. NO database writes.
+ * Default mode is `catalog` (names + categories only).
  */
 export function parseInventoryWorkbookBuffer(
   buffer: ArrayBuffer,
   filename: string,
   fx: OperationalFxRates = getOperationalFx(),
+  mode: InventoryImportMode = "catalog",
 ): InventoryImportPreviewReport {
   const wb = XLSX.read(buffer, { type: "array", cellDates: false });
   const normalizedInFile = new Map<string, string>();
@@ -143,13 +163,16 @@ export function parseInventoryWorkbookBuffer(
   }
 
   const unknownSheets: string[] = [];
+  const excludedSheets: string[] = [];
   const missingExpectedSheets: string[] = [];
   const allRows: ParsedInventoryImportRow[] = [];
 
   for (const rawName of wb.SheetNames) {
     const norm = normalizeSheetName(rawName);
     const expected = EXPECTED_IMPORT_CATEGORIES.some((c) => c === norm);
-    if (!expected) unknownSheets.push(rawName);
+    const excluded = EXCLUDED_IMPORT_CATEGORIES.some((c) => c === norm);
+    if (excluded) excludedSheets.push(rawName);
+    else if (!expected) unknownSheets.push(rawName);
   }
 
   for (const expected of EXPECTED_IMPORT_CATEGORIES) {
@@ -162,7 +185,14 @@ export function parseInventoryWorkbookBuffer(
     const ws = wb.Sheets[rawName];
     if (!ws) continue;
     const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, raw: true }) as unknown[][];
-    allRows.push(...parseSheetRows(expected, matrix, fx));
+    allRows.push(...parseSheetRows(expected, matrix, fx, mode));
+  }
+
+  // Never parse Dummy Heads (or any excluded sheet), even if present.
+  for (const excluded of EXCLUDED_IMPORT_CATEGORIES) {
+    if (normalizedInFile.has(excluded) && !excludedSheets.length) {
+      excludedSheets.push(normalizedInFile.get(excluded)!);
+    }
   }
 
   const duplicateNameWarnings = applyDuplicateWarnings(allRows);
@@ -176,6 +206,7 @@ export function parseInventoryWorkbookBuffer(
   return {
     filename,
     parsedAt: new Date().toISOString(),
+    mode,
     fxNgnPerUsd: fx.ngnPerUsd,
     fxLrdPerUsd: fx.lrdPerUsd,
     rows: allRows,
@@ -191,6 +222,7 @@ export function parseInventoryWorkbookBuffer(
       duplicateNameWarnings,
       unknownSheets,
       missingExpectedSheets,
+      excludedSheets: [...new Set(excludedSheets)],
     },
   };
 }

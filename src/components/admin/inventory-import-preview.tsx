@@ -11,7 +11,6 @@ import type {
   InventoryImportValidationStatus,
   ParsedInventoryImportRow,
 } from "@/lib/admin/inventory-import/types";
-import { formatSalonMoney } from "@/lib/admin/salon-format";
 import {
   DEFAULT_OPERATIONAL_LRD_PER_USD,
   DEFAULT_OPERATIONAL_NGN_PER_USD,
@@ -39,7 +38,6 @@ export function InventoryImportPreviewPanel() {
   const [err, setErr] = useState<string | null>(null);
   const [report, setReport] = useState<InventoryImportPreviewReport | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<InventoryImportValidationStatus | "all">("all");
   const [overrides, setOverrides] = useState<Record<string, InventoryImportRowOverride>>({});
   const [commitResult, setCommitResult] = useState<Awaited<ReturnType<typeof commitInventoryImportAction>> | null>(
     null,
@@ -60,10 +58,9 @@ export function InventoryImportPreviewPanel() {
       .map((r) => applyInventoryImportOverride(r, overrides[r.id], fx))
       .filter((r) => {
         if (categoryFilter !== "all" && r.category !== categoryFilter) return false;
-        if (statusFilter !== "all" && r.validationStatus !== statusFilter) return false;
         return true;
       });
-  }, [report, overrides, categoryFilter, statusFilter, fx]);
+  }, [report, overrides, categoryFilter, fx]);
 
   const effectiveSummary = useMemo(() => {
     if (!report) return null;
@@ -71,9 +68,8 @@ export function InventoryImportPreviewPanel() {
     const importable = rows.filter(
       (r) => !r.skipped && (r.validationStatus === "ok" || r.validationStatus === "warning"),
     ).length;
-    const unresolved = rows.filter((r) => r.validationStatus === "needs_review" && !r.skipped).length;
     const userSkipped = rows.filter((r) => r.skipped).length;
-    return { importable, unresolved, userSkipped, total: rows.length };
+    return { importable, userSkipped, total: rows.length };
   }, [report, overrides, fx]);
 
   const canCommit = !!report && (effectiveSummary?.importable ?? 0) > 0 && !committing && !pending;
@@ -83,8 +79,9 @@ export function InventoryImportPreviewPanel() {
       <section className="admin-card space-y-4 p-6">
         <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Upload workbook</h2>
         <p className="text-xs text-white/50">
-          Parse and validate every row first. Commit imports validated rows only — unresolved rows stay in the batch for
-          later review without blocking migration.
+          Catalog-only mode: imports <strong className="text-white/70">category + product name</strong> only. Quantity,
+          cost, and prices are left empty for owner/manager setup. The Dummy Heads worksheet is excluded; products named
+          “Dummy Head” on other sheets (e.g. Lash Extension) are kept.
         </p>
         <form
           className="flex flex-col gap-3 sm:flex-row sm:items-end"
@@ -102,7 +99,6 @@ export function InventoryImportPreviewPanel() {
               setReport(res.report);
               setOverrides({});
               setCategoryFilter("all");
-              setStatusFilter("all");
             });
           }}
         >
@@ -129,33 +125,18 @@ export function InventoryImportPreviewPanel() {
 
       {commitResult?.ok ? (
         <section className="admin-card border-emerald-500/30 bg-emerald-500/[0.06] space-y-3 p-5">
-          <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80">Import complete</h3>
+          <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80">Catalog seeded</h3>
           <ul className="space-y-1 text-sm text-emerald-100/90">
             <li>
-              <strong>Imported:</strong> {commitResult.summary.importedCount} rows
+              <strong>Imported:</strong> {commitResult.summary.importedCount} products
             </li>
-            <li>
-              <strong>Skipped for review:</strong> {commitResult.summary.skippedUnresolvedCount} rows (preserved in
-              batch)
-            </li>
-            {commitResult.summary.userSkippedCount > 0 ? (
-              <li>
-                <strong>User skipped:</strong> {commitResult.summary.userSkippedCount}
-              </li>
-            ) : null}
-            {commitResult.summary.warningCount > 0 ? (
-              <li>
-                <strong>Warnings imported:</strong> {commitResult.summary.warningCount}
-              </li>
-            ) : null}
             <li>
               <strong>Archived prior inventory:</strong> {commitResult.summary.archivedCount} items
             </li>
             <li className="font-mono text-xs text-emerald-200/70">Batch {commitResult.batchId}</li>
           </ul>
           <p className="text-xs text-emerald-100/60">
-            Unresolved rows remain in this batch for later import after owner review. Opening quantities created{" "}
-            <code className="text-emerald-200/80">opening_balance</code> movements automatically.
+            Catalog products are created with quantity 0 and empty pricing — complete setup on each inventory detail page.
           </p>
         </section>
       ) : null}
@@ -168,19 +149,25 @@ export function InventoryImportPreviewPanel() {
 
       {report ? (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-            <SummaryCard label="Total rows" value={report.summary.totalRows} />
-            <SummaryCard label="OK" value={report.summary.ok} accent="emerald" />
-            <SummaryCard label="Warning" value={report.summary.warning} accent="amber" />
-            <SummaryCard label="Needs review" value={report.summary.needsReview} accent="violet" />
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <SummaryCard label="Included products" value={report.summary.totalRows} />
             <SummaryCard label="Will import" value={effectiveSummary?.importable ?? 0} accent="gold" />
-            <SummaryCard label="Deferred" value={effectiveSummary?.unresolved ?? 0} accent="violet" />
+            <SummaryCard label="Skipped" value={effectiveSummary?.userSkipped ?? report.summary.skipped} accent="amber" />
+            <SummaryCard label="Duplicates" value={report.summary.duplicateNameWarnings} accent="amber" />
+            <SummaryCard label="Invalid" value={report.summary.error} accent="violet" />
           </section>
 
-          {(report.summary.missingExpectedSheets.length > 0 || report.summary.unknownSheets.length > 0) ? (
+          {(report.summary.excludedSheets?.length ?? 0) > 0 ||
+          report.summary.missingExpectedSheets.length > 0 ||
+          report.summary.unknownSheets.length > 0 ? (
             <section className="admin-card border-amber-500/25 bg-amber-500/[0.06] p-4 text-xs text-amber-100/90">
+              {(report.summary.excludedSheets?.length ?? 0) > 0 ? (
+                <p>
+                  Excluded sheets (not imported): <strong>{report.summary.excludedSheets.join(", ")}</strong>
+                </p>
+              ) : null}
               {report.summary.missingExpectedSheets.length > 0 ? (
-                <p>Missing expected sheets: {report.summary.missingExpectedSheets.join(", ")}</p>
+                <p className="mt-1">Missing expected sheets: {report.summary.missingExpectedSheets.join(", ")}</p>
               ) : null}
               {report.summary.unknownSheets.length > 0 ? (
                 <p className="mt-1">Extra sheets (ignored): {report.summary.unknownSheets.join(", ")}</p>
@@ -189,10 +176,14 @@ export function InventoryImportPreviewPanel() {
           ) : null}
 
           <section className="admin-card p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/45">FX (pricing-engine preview)</p>
-            <p className="mt-1 text-sm text-white/70">
-              ₦{report.fxNgnPerUsd.toLocaleString()}/USD · LD {report.fxLrdPerUsd}/USD
-            </p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/45">By category</p>
+            <ul className="mt-2 grid gap-1 text-sm text-white/70 sm:grid-cols-2">
+              {report.categorySummaries.map((c) => (
+                <li key={c.category}>
+                  {c.category}: <strong className="text-white">{c.importable}</strong> products
+                </li>
+              ))}
+            </ul>
           </section>
 
           <section className="flex flex-wrap gap-2">
@@ -207,35 +198,21 @@ export function InventoryImportPreviewPanel() {
             ))}
           </section>
 
-          <section className="flex flex-wrap gap-2">
-            {(["all", "ok", "warning", "needs_review", "error"] as const).map((s) => (
-              <FilterChip
-                key={s}
-                active={statusFilter === s}
-                onClick={() => setStatusFilter(s)}
-                label={s === "all" ? "All statuses" : STATUS_LABEL[s]}
-              />
-            ))}
-          </section>
-
           <section className="admin-card admin-x-scroll overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-left text-xs">
+            <table className="w-full min-w-[720px] text-left text-xs">
               <thead>
                 <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/45">
                   <th className="px-2 py-2">Status</th>
                   <th className="px-2 py-2">Category</th>
-                  <th className="px-2 py-2">Row</th>
                   <th className="px-2 py-2">Product</th>
-                  <th className="px-2 py-2">Qty / unit</th>
-                  <th className="px-2 py-2">Retail ₦</th>
-                  <th className="px-2 py-2">USD / LD</th>
-                  <th className="px-2 py-2">Messages</th>
+                  <th className="px-2 py-2">Source sheet</th>
+                  <th className="px-2 py-2">Row</th>
                   <th className="px-2 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {displayRows.map((row) => (
-                  <PreviewRow
+                  <CatalogPreviewRow
                     key={row.id}
                     row={row}
                     override={overrides[row.id]}
@@ -248,11 +225,10 @@ export function InventoryImportPreviewPanel() {
           </section>
 
           <section className="admin-card border border-white/10 p-5">
-            <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Commit import</h3>
+            <h3 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Commit catalog seed</h3>
             <p className="mt-2 text-sm text-white/55">
-              Will import <strong className="text-white">{effectiveSummary?.importable ?? 0}</strong> validated rows and
-              defer <strong className="text-white">{effectiveSummary?.unresolved ?? 0}</strong> unresolved rows for
-              later review. Existing live inventory will be archived (not deleted) — sales and movement history preserved.
+              Will seed <strong className="text-white">{effectiveSummary?.importable ?? 0}</strong> product names with
+              empty operational figures. Existing live inventory will be archived (not hard-deleted).
             </p>
             {!confirmOpen ? (
               <button
@@ -264,15 +240,12 @@ export function InventoryImportPreviewPanel() {
                 }}
                 className="admin-btn-primary mt-4 rounded-full px-6 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Review & commit import
+                Review &amp; commit catalog
               </button>
             ) : (
               <div className="mt-4 space-y-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-4">
                 <p className="text-sm text-amber-100/90">
-                  Confirm: archive all current inventory and import {effectiveSummary?.importable ?? 0} rows?
-                  {effectiveSummary?.unresolved ? (
-                    <> {effectiveSummary.unresolved} unresolved rows will be saved in batch {report.filename}.</>
-                  ) : null}
+                  Confirm: archive current live inventory and seed {effectiveSummary?.importable ?? 0} catalog products?
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -290,7 +263,7 @@ export function InventoryImportPreviewPanel() {
                     }}
                     className="admin-btn-primary rounded-full px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] disabled:opacity-50"
                   >
-                    {committing ? "Importing…" : "Confirm import"}
+                    {committing ? "Importing…" : "Confirm catalog seed"}
                   </button>
                   <button
                     type="button"
@@ -307,6 +280,45 @@ export function InventoryImportPreviewPanel() {
         </>
       ) : null}
     </div>
+  );
+}
+
+function CatalogPreviewRow({
+  row,
+  override,
+  onOverride,
+}: {
+  row: ParsedInventoryImportRow;
+  override?: InventoryImportRowOverride;
+  onOverride: (patch: InventoryImportRowOverride) => void;
+}) {
+  const skipped = !!override?.skipped || row.skipped;
+  return (
+    <tr className={cn("border-b border-white/[0.06]", skipped && "opacity-45")}>
+      <td className="px-2 py-2">
+        <span
+          className={cn(
+            "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase",
+            STATUS_CLS[row.validationStatus],
+          )}
+        >
+          {skipped ? "Skip" : STATUS_LABEL[row.validationStatus]}
+        </span>
+      </td>
+      <td className="px-2 py-2 text-white/80">{row.category}</td>
+      <td className="px-2 py-2 text-white">{row.productName}</td>
+      <td className="px-2 py-2 text-white/55">{row.sourceSheet}</td>
+      <td className="px-2 py-2 font-mono text-white/55">{row.sourceRow}</td>
+      <td className="px-2 py-2">
+        <button
+          type="button"
+          className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--admin-accent)]"
+          onClick={() => onOverride({ skipped: !skipped })}
+        >
+          {skipped ? "Include" : "Skip"}
+        </button>
+      </td>
+    </tr>
   );
 }
 
@@ -349,90 +361,5 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
     >
       {label}
     </button>
-  );
-}
-
-function PreviewRow({
-  row,
-  override,
-  onOverride,
-}: {
-  row: ParsedInventoryImportRow;
-  override?: InventoryImportRowOverride;
-  onOverride: (patch: InventoryImportRowOverride) => void;
-}) {
-  const skipped = override?.skipped || row.skipped;
-  return (
-    <tr className={cn("border-b border-white/[0.06] align-top", skipped && "opacity-50")}>
-      <td className="px-2 py-2">
-        <span
-          className={cn(
-            "inline-flex rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase",
-            STATUS_CLS[row.validationStatus],
-          )}
-        >
-          {STATUS_LABEL[row.validationStatus]}
-        </span>
-      </td>
-      <td className="px-2 py-2 text-white/70">{row.category}</td>
-      <td className="px-2 py-2 font-mono text-white/45">{row.sourceRow}</td>
-      <td className="px-2 py-2 text-white">
-        {row.productName}
-        {row.sectionNote ? <span className="mt-0.5 block text-[10px] text-white/40">{row.sectionNote}</span> : null}
-        <span className="mt-0.5 block text-[10px] font-mono text-white/30">{row.parserProfile}</span>
-      </td>
-      <td className="px-2 py-2">
-        <input
-          type="number"
-          step="0.01"
-          min="0"
-          className="w-20 rounded border border-white/10 bg-black/30 px-1.5 py-1 text-white"
-          value={override?.quantity ?? row.quantity ?? ""}
-          onChange={(e) => onOverride({ quantity: Number(e.target.value) })}
-        />
-        <span className="ml-1 text-white/45">{row.unit}</span>
-      </td>
-      <td className="px-2 py-2">
-        <input
-          type="number"
-          step="1"
-          min="0"
-          className="w-24 rounded border border-white/10 bg-black/30 px-1.5 py-1 text-white"
-          value={override?.retailNgnMajor ?? row.retailNgnMajor ?? ""}
-          onChange={(e) => onOverride({ retailNgnMajor: Number(e.target.value) })}
-        />
-      </td>
-      <td className="px-2 py-2 text-white/60">
-        {row.derivedSellUsdCents != null ? formatSalonMoney(row.derivedSellUsdCents, "USD") : "—"}
-        <br />
-        {row.derivedSellLrdCents != null ? formatSalonMoney(row.derivedSellLrdCents, "LRD") : "—"}
-      </td>
-      <td className="max-w-xs px-2 py-2 text-[10px] text-white/45">
-        <ul className="list-disc pl-3">
-          {row.validationMessages.map((m, i) => (
-            <li key={i}>{m}</li>
-          ))}
-        </ul>
-      </td>
-      <td className="space-y-1 px-2 py-2">
-        <button
-          type="button"
-          className="block text-[10px] uppercase text-[var(--admin-accent)]"
-          onClick={() => onOverride({ skipped: !override?.skipped })}
-        >
-          {override?.skipped ? "Unskip" : "Skip"}
-        </button>
-        {row.requiresOwnerConfirmation ? (
-          <label className="flex items-center gap-1 text-[10px] text-white/55">
-            <input
-              type="checkbox"
-              checked={!!override?.ownerConfirmed}
-              onChange={(e) => onOverride({ ownerConfirmed: e.target.checked })}
-            />
-            Confirm carton
-          </label>
-        ) : null}
-      </td>
-    </tr>
   );
 }

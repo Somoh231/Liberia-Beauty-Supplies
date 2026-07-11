@@ -17,10 +17,12 @@ export {
   getDefaultNgnPerUsd,
   getLrdPerUsd,
   getOperationalFx,
+  inventoryNeedsSetup,
   lineRevenueUsdEquivCents,
   ngnKoboToUsdCents,
   resolveOperationalFxFromSettings,
   saleLineFinancialPreview,
+  usdCentsToNgnKobo,
 } from "@/lib/admin/pricing-engine";
 
 export type { InventoryCostingInput } from "@/lib/admin/pricing-engine";

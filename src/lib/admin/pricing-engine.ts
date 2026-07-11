@@ -1,6 +1,15 @@
 /**
  * Central operational FX and pricing math for inventory, purchases, sales, and reporting.
  * All modules should use this module (directly or via `salon-finance` re-exports) — do not duplicate FX.
+ *
+ * Canonical minor-unit contract (must match SQL helpers):
+ *   usd_cents = ngn_kobo / ngn_per_usd
+ *   ngn_kobo  = usd_cents * ngn_per_usd
+ *   usd_cents = lrd_cents / lrd_per_usd
+ *   lrd_cents = usd_cents * lrd_per_usd
+ *
+ * Baselines: 1 USD = 1385 NGN, 1 USD = 190 LRD.
+ * Resolution: valid operational_settings (>0) → official fallback.
  */
 
 import type { SalonCurrency } from "@/lib/admin/salon-format";
@@ -74,22 +83,35 @@ export function getDefaultNgnPerUsd(): number {
   return DEFAULT_OPERATIONAL_NGN_PER_USD;
 }
 
+/** NGN kobo → USD cents: usd_cents = ngn_kobo / ngn_per_usd */
 export function ngnKoboToUsdCents(ngnKobo: number, ngnPerUsd: number): number {
   if (!Number.isFinite(ngnKobo) || ngnKobo < 0) return 0;
   if (!Number.isFinite(ngnPerUsd) || ngnPerUsd <= 0) return 0;
   return Math.round(ngnKobo / ngnPerUsd);
 }
 
-/** Convert USD cents → LRD cents using operational LD/USD rate. */
-export function convertUsdCentsToLrdCents(usdCents: number, lrdPerUsd = getLrdPerUsd()): number {
-  if (!Number.isFinite(usdCents)) return 0;
-  return Math.round((usdCents * lrdPerUsd) / 100);
+/** USD cents → NGN kobo: ngn_kobo = usd_cents × ngn_per_usd */
+export function usdCentsToNgnKobo(usdCents: number, ngnPerUsd: number): number {
+  if (!Number.isFinite(usdCents) || usdCents < 0) return 0;
+  if (!Number.isFinite(ngnPerUsd) || ngnPerUsd <= 0) return 0;
+  return Math.round(usdCents * ngnPerUsd);
 }
 
-/** Convert LRD cents → USD cents. */
+/**
+ * Convert USD cents → LRD cents: lrd_cents = usd_cents × lrd_per_usd
+ * (Both currencies use 1/100 minor units; FX is major-per-major so no extra /100.)
+ */
+export function convertUsdCentsToLrdCents(usdCents: number, lrdPerUsd = getLrdPerUsd()): number {
+  if (!Number.isFinite(usdCents) || usdCents < 0) return 0;
+  if (!Number.isFinite(lrdPerUsd) || lrdPerUsd <= 0) return 0;
+  return Math.round(usdCents * lrdPerUsd);
+}
+
+/** Convert LRD cents → USD cents: usd_cents = lrd_cents / lrd_per_usd */
 export function convertLrdCentsToUsdCents(lrdCents: number, lrdPerUsd = getLrdPerUsd()): number {
-  if (!Number.isFinite(lrdCents) || lrdPerUsd <= 0) return 0;
-  return Math.round((lrdCents * 100) / lrdPerUsd);
+  if (!Number.isFinite(lrdCents) || lrdCents < 0) return 0;
+  if (!Number.isFinite(lrdPerUsd) || lrdPerUsd <= 0) return 0;
+  return Math.round(lrdCents / lrdPerUsd);
 }
 
 /**
@@ -119,7 +141,20 @@ export function convertRetailUnitMajorOnCurrencySwitch(
 export type EffectiveCostOptions = {
   /** When true, skip weighted-average landed and use supplier + FX + landed ladder only (draft/book view). */
   ignoreWeightedAvg?: boolean;
+  /** Operational FX when item-level NGN FX is unset (defaults to platform baseline). */
+  operationalFx?: OperationalFxRates;
 };
+
+function resolveNgnFx(itemFx: number | null | undefined, operationalFx?: OperationalFxRates): number {
+  if (itemFx != null && itemFx > 0) return Number(itemFx);
+  if (operationalFx && operationalFx.ngnPerUsd > 0) return operationalFx.ngnPerUsd;
+  return getDefaultNgnPerUsd();
+}
+
+function resolveLrdFx(operationalFx?: OperationalFxRates): number {
+  if (operationalFx && operationalFx.lrdPerUsd > 0) return operationalFx.lrdPerUsd;
+  return getLrdPerUsd();
+}
 
 /** Weighted-average landed unit cost in USD cents (canonical). */
 export function effectiveUnitCostUsdCents(item: InventoryCostingInput, opts?: EffectiveCostOptions): number {
@@ -133,13 +168,12 @@ export function effectiveUnitCostUsdCents(item: InventoryCostingInput, opts?: Ef
     return Math.max(0, Math.round(item.avg_unit_cost_cents) + landed);
   }
   if (item.cost_currency === "NGN") {
-    const fx =
-      item.fx_ngn_per_usd != null && item.fx_ngn_per_usd > 0 ? Number(item.fx_ngn_per_usd) : getDefaultNgnPerUsd();
+    const fx = resolveNgnFx(item.fx_ngn_per_usd, opts?.operationalFx);
     const usd = ngnKoboToUsdCents(item.avg_unit_cost_cents, fx);
     return usd + landed;
   }
   if (item.cost_currency === "LRD") {
-    const perUsd = getLrdPerUsd();
+    const perUsd = resolveLrdFx(opts?.operationalFx);
     const usd = Math.round(item.avg_unit_cost_cents / perUsd);
     return usd + landed;
   }
@@ -152,7 +186,7 @@ export function inventoryValueUsdCents(item: InventoryCostingInput): number {
   return Math.round(q * effectiveUnitCostUsdCents(item));
 }
 
-/** Per-unit gross profit in USD cents (retail USD − landed WAC USD). */
+/** Per-unit gross profit in USD cents (retail USD − landed WAC USD). Negative GP is preserved. */
 export function unitGrossProfitUsdCents(item: InventoryCostingInput, opts?: EffectiveCostOptions): number | null {
   const sell = item.sell_price_usd_cents;
   if (sell == null || sell <= 0) return null;
@@ -204,16 +238,18 @@ export function isInvalidManualNgnPerUsdField(fxNgnPerUsdText: string): boolean 
 }
 
 /** Supplier cost → USD cents (excluding landed uplift) — for live conversion hints. */
-export function supplierUnitCostToUsdCentsExclLanded(item: InventoryCostingInput): number {
+export function supplierUnitCostToUsdCentsExclLanded(
+  item: InventoryCostingInput,
+  operationalFx?: OperationalFxRates,
+): number {
   const { avg_unit_cost_cents, cost_currency, fx_ngn_per_usd } = item;
   if (cost_currency === "USD") return Math.max(0, Math.round(avg_unit_cost_cents));
   if (cost_currency === "NGN") {
-    const fx =
-      fx_ngn_per_usd != null && fx_ngn_per_usd > 0 ? Number(fx_ngn_per_usd) : getDefaultNgnPerUsd();
+    const fx = resolveNgnFx(fx_ngn_per_usd, operationalFx);
     return ngnKoboToUsdCents(avg_unit_cost_cents, fx);
   }
   if (cost_currency === "LRD") {
-    const perUsd = getLrdPerUsd();
+    const perUsd = resolveLrdFx(operationalFx);
     return Math.max(0, Math.round(avg_unit_cost_cents / perUsd));
   }
   return 0;
@@ -224,10 +260,13 @@ export function unitMarginPctAtRetailPriceMinor(
   unitPriceMinor: number,
   currency: "USD" | "LRD",
   wacUsdCentsPerUnit: number,
+  lrdPerUsd = getLrdPerUsd(),
 ): number | null {
   if (!Number.isFinite(unitPriceMinor) || unitPriceMinor <= 0) return null;
   const retailUsdCents =
-    currency === "USD" ? Math.round(unitPriceMinor) : convertLrdCentsToUsdCents(Math.round(unitPriceMinor));
+    currency === "USD"
+      ? Math.round(unitPriceMinor)
+      : convertLrdCentsToUsdCents(Math.round(unitPriceMinor), lrdPerUsd);
   if (retailUsdCents <= 0) return null;
   const gp = retailUsdCents - wacUsdCentsPerUnit;
   return (gp / retailUsdCents) * 100;
@@ -244,26 +283,36 @@ export function formatOperationalFxSummaryLineFromRates(rates: OperationalFxRate
   return `₦${ngn}/USD · LD ${lrd}/USD`;
 }
 
-/** Line revenue in USD cents for qty × unit price in `currency`. */
-export function lineRevenueUsdEquivCents(unitPriceMinor: number, qty: number, currency: SalonCurrency): number {
+/**
+ * Line revenue in USD cents for qty × unit price in `currency`.
+ * Precedence for NGN: caller should pass item/settings FX via `fx` when available.
+ */
+export function lineRevenueUsdEquivCents(
+  unitPriceMinor: number,
+  qty: number,
+  currency: SalonCurrency,
+  fx?: OperationalFxRates,
+): number {
   const line = Math.round(qty * unitPriceMinor);
   if (currency === "USD") return line;
   if (currency === "LRD") {
-    return convertLrdCentsToUsdCents(line, getLrdPerUsd());
+    const lrd = fx?.lrdPerUsd && fx.lrdPerUsd > 0 ? fx.lrdPerUsd : getLrdPerUsd();
+    return convertLrdCentsToUsdCents(line, lrd);
   }
   if (currency === "NGN") {
-    const perUsd = getDefaultNgnPerUsd();
-    return Math.round(line / perUsd);
+    const perUsd = fx?.ngnPerUsd && fx.ngnPerUsd > 0 ? fx.ngnPerUsd : getDefaultNgnPerUsd();
+    return ngnKoboToUsdCents(line, perUsd);
   }
   return line;
 }
 
-/** Retail sale line preview (client or server). */
+/** Retail sale line preview (client or server). Negative GP preserved. */
 export function saleLineFinancialPreview(input: {
   qty: number;
   unitPriceCents: number;
   currency: Extract<SalonCurrency, "USD" | "LRD">;
   wacUsdCentsPerUnit: number;
+  fx?: OperationalFxRates;
 }): {
   revenueUsdCents: number;
   grossProfitUsdCents: number;
@@ -273,7 +322,7 @@ export function saleLineFinancialPreview(input: {
   const qty = Number.isFinite(input.qty) ? input.qty : 0;
   const unit = Number.isFinite(input.unitPriceCents) ? input.unitPriceCents : 0;
   const totalNativeCents = Math.round(qty * unit);
-  const revenueUsdCents = lineRevenueUsdEquivCents(unit, qty, input.currency);
+  const revenueUsdCents = lineRevenueUsdEquivCents(unit, qty, input.currency, input.fx);
   const costUsdCents = Math.round(qty * input.wacUsdCentsPerUnit);
   const grossProfitUsdCents = revenueUsdCents - costUsdCents;
   const marginPct = revenueUsdCents > 0 ? (grossProfitUsdCents / revenueUsdCents) * 100 : null;
@@ -293,4 +342,25 @@ export function complementaryRetailLabel(
   }
   const usd = convertLrdCentsToUsdCents(cents);
   return { equivalentLabel: "USD", equivalentCents: usd, equivalentCurrency: "USD" };
+}
+
+/** Catalog SKUs that still need owner/manager operational setup. */
+export function inventoryNeedsSetup(item: {
+  quantity_on_hand?: number | null;
+  avg_unit_cost_cents?: number | null;
+  weighted_avg_landed_usd_cents?: number | null;
+  sell_price_usd_cents?: number | null;
+  sell_price_lrd_cents?: number | null;
+  store_price_usd_cents?: number | null;
+  supplier_id?: string | null;
+  fx_ngn_per_usd?: number | null;
+}): boolean {
+  const qty = Number(item.quantity_on_hand ?? 0);
+  const cost = Number(item.avg_unit_cost_cents ?? 0);
+  const wac = Number(item.weighted_avg_landed_usd_cents ?? 0);
+  const hasRetail =
+    (item.sell_price_usd_cents != null && item.sell_price_usd_cents > 0) ||
+    (item.sell_price_lrd_cents != null && item.sell_price_lrd_cents > 0) ||
+    (item.store_price_usd_cents != null && item.store_price_usd_cents > 0);
+  return qty === 0 && cost === 0 && wac === 0 && !hasRetail && !item.supplier_id;
 }

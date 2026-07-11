@@ -100,6 +100,43 @@ function finalizeRow(row: ParsedInventoryImportRow, fx: OperationalFxRates): Par
   return row;
 }
 
+type CatalogParseContext = ParseContext & {
+  profileHint: InventoryImportParserProfile;
+};
+
+/** Catalog-only row: product name + category; no financial inference. */
+export function parseCatalogNameRow(cells: unknown[], ctx: CatalogParseContext): ParsedInventoryImportRow | null {
+  const nameIdx = ctx.profileHint === "hair_products_mixed" ? 1 : 1;
+  const productName = cellString(cells[nameIdx]).trim() || cellString(cells[0]).trim();
+  if (!productName || productName.length < 2) return null;
+  if (/^\d+(\.\d+)?$/.test(productName)) return null;
+  if (/^(s\/?n|list|quantity|retail|rate|item name)$/i.test(productName)) return null;
+
+  const raw: InventoryImportRawCells = {
+    product_name: productName,
+    source_sheet: ctx.sheet,
+    source_row: ctx.rowIndex,
+  };
+  const row = baseRow(ctx, "catalog_name", raw);
+  row.productName = productName;
+  row.quantity = null;
+  row.unit = "each";
+  row.retailNgnMajor = null;
+  row.retailNgnCents = null;
+  row.derivedSellUsdCents = null;
+  row.derivedSellLrdCents = null;
+  row.requiresOwnerConfirmation = false;
+  row.validationStatus = "ok";
+  row.validationMessages = [];
+  row.skipped = false;
+  row.skipReason = null;
+  row.duplicateKey = `${row.category}::${productName.toLowerCase()}`;
+  if (ctx.sectionNote) {
+    row.sectionNote = ctx.sectionNote;
+  }
+  return row;
+}
+
 export function parseStandardRetailRow(cells: unknown[], ctx: ParseContext): ParsedInventoryImportRow {
   const raw: InventoryImportRawCells = {
     sn: cellString(cells[0]),
@@ -301,7 +338,7 @@ export function detectProfileForSheet(sheetName: string): InventoryImportParserP
   const n = sheetName.trim();
   if (n === "Makeup Products") return "makeup_retail";
   if (n === "List of Hair Products") return "hair_products_mixed";
-  if (n === "Dummy Heads") return "carton";
+  // Dummy Heads sheet is excluded from EXPECTED_IMPORT_CATEGORIES — never parsed.
   return "standard_retail";
 }
 

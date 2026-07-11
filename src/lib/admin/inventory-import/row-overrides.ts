@@ -63,6 +63,10 @@ export type ImportCommitRowPayload = {
   sell_lrd_cents: number | null;
   notes: string | null;
   validation_status: "ok" | "warning";
+  /** Catalog-only seed: ignore quantity/retail and create empty setup SKUs. */
+  catalog_only?: boolean;
+  source_sheet?: string;
+  source_row?: number;
 };
 
 export type UnresolvedRowSnapshot = {
@@ -86,12 +90,35 @@ export type ImportCommitPlan = {
   errorCount: number;
   warningCount: number;
   categoryTotals: Record<string, { imported: number; unresolved: number; skipped: number }>;
+  catalogOnly: boolean;
 };
 
 function noteFromRow(row: ParsedInventoryImportRow): string | null {
   const parts: string[] = [];
   if (row.sectionNote) parts.push(row.sectionNote);
+  parts.push(`Source: ${row.sourceSheet} row ${row.sourceRow}`);
   return parts.length ? parts.join(" · ") : null;
+}
+
+function toCatalogImportPayload(row: ParsedInventoryImportRow): ImportCommitRowPayload | null {
+  const name = row.productName.trim();
+  if (name.length < 2) return null;
+  if (row.validationStatus !== "ok" && row.validationStatus !== "warning") return null;
+  return {
+    preview_id: row.id,
+    product_name: name,
+    category: row.category,
+    quantity: 0,
+    unit: "each",
+    retail_ngn_cents: 0,
+    sell_usd_cents: null,
+    sell_lrd_cents: null,
+    notes: noteFromRow(row),
+    validation_status: row.validationStatus,
+    catalog_only: true,
+    source_sheet: row.sourceSheet,
+    source_row: row.sourceRow,
+  };
 }
 
 function toImportPayload(row: ParsedInventoryImportRow): ImportCommitRowPayload | null {
@@ -108,6 +135,9 @@ function toImportPayload(row: ParsedInventoryImportRow): ImportCommitRowPayload 
     sell_lrd_cents: row.derivedSellLrdCents,
     notes: noteFromRow(row),
     validation_status: row.validationStatus,
+    catalog_only: false,
+    source_sheet: row.sourceSheet,
+    source_row: row.sourceRow,
   };
 }
 
@@ -133,6 +163,7 @@ export function buildImportCommitPlan(
   overrides: Record<string, InventoryImportRowOverride>,
 ): ImportCommitPlan {
   const fx = { ngnPerUsd: report.fxNgnPerUsd, lrdPerUsd: report.fxLrdPerUsd };
+  const catalogOnly = report.mode !== "financial";
   const importRows: ImportCommitRowPayload[] = [];
   const unresolvedRows: UnresolvedRowSnapshot[] = [];
   let skippedCount = 0;
@@ -150,7 +181,7 @@ export function buildImportCommitPlan(
     const disposition = classifyImportRow(row);
 
     if (disposition === "import") {
-      const payload = toImportPayload(row);
+      const payload = catalogOnly ? toCatalogImportPayload(row) : toImportPayload(row);
       if (!payload) {
         errorCount += 1;
         unresolvedRows.push(toUnresolvedSnapshot(row));
@@ -172,5 +203,13 @@ export function buildImportCommitPlan(
     }
   }
 
-  return { importRows, unresolvedRows, skippedCount, errorCount, warningCount, categoryTotals };
+  return {
+    importRows,
+    unresolvedRows,
+    skippedCount,
+    errorCount,
+    warningCount,
+    categoryTotals,
+    catalogOnly,
+  };
 }

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchInventoryProductsPage, fetchInventoryStatusSummary, fetchLastMovementByItemIds, fetchOperationalSettings } from "@/lib/admin/salon-queries";
 import { formatSalonMoney, type StockStatus } from "@/lib/admin/salon-format";
-import { effectiveUnitCostUsdCents, resolveOperationalFxFromSettings, unitGrossMarginPct, unitGrossProfitUsdCents } from "@/lib/admin/pricing-engine";
+import { effectiveUnitCostUsdCents, inventoryNeedsSetup, resolveOperationalFxFromSettings, unitGrossMarginPct, unitGrossProfitUsdCents } from "@/lib/admin/pricing-engine";
 import { cn } from "@/lib/utils";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 
@@ -183,6 +183,7 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
               const usdUnit = effectiveUnitCostUsdCents(row);
               const gross = unitGrossProfitUsdCents(row);
               const margin = unitGrossMarginPct(row);
+              const needsSetup = inventoryNeedsSetup(row);
               const supplierCell =
                 row.cost_currency === "NGN"
                   ? formatSalonMoney(row.avg_unit_cost_cents, "NGN")
@@ -193,6 +194,11 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
                 <tr key={row.id} className="border-b border-white/[0.06]">
                   <td className="px-3 py-3 text-white">
                     <span className="font-medium">{row.product_name}</span>
+                    {needsSetup ? (
+                      <span className="admin-badge ml-1.5 uppercase tracking-wide text-amber-100/90 ring-1 ring-amber-400/35">
+                        Needs setup
+                      </span>
+                    ) : null}
                     {row.stock_status === "low_stock" ? (
                       <span className="admin-badge admin-badge-low ml-1.5 uppercase tracking-wide">Low</span>
                     ) : null}
@@ -201,8 +207,17 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
                     ) : null}
                     <span className="ml-2 font-mono text-[10px] text-white/35">{row.product_code}</span>
                     {!row.active ? <span className="ml-2 text-[10px] uppercase text-white/35">inactive</span> : null}
+                    {row.category ? <span className="mt-0.5 block text-[10px] text-white/40">{row.category}</span> : null}
                   </td>
-                  <td className="px-3 py-3">{statusBadge(row.stock_status)}</td>
+                  <td className="px-3 py-3">
+                    {needsSetup ? (
+                      <span className="admin-badge uppercase tracking-wide text-amber-100/90 ring-1 ring-amber-400/35">
+                        Needs setup
+                      </span>
+                    ) : (
+                      statusBadge(row.stock_status)
+                    )}
+                  </td>
                   <td className="px-3 py-3 text-white/85">
                     {row.quantity_on_hand} <span className="text-white/40">{row.unit}</span>
                   </td>

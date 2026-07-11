@@ -4,7 +4,7 @@ import { getAdminContext } from "@/lib/auth/admin-context";
 import { requireNotStaff, requireManagerOrAbove } from "@/lib/auth/admin-guards";
 import type { SalonActionResult } from "@/lib/auth/salon-action-result";
 import { normalizeCurrency, parseMoneyToCents, parseQty, type SalonCurrency } from "@/lib/admin/salon-format";
-import { effectiveUnitCostUsdCents, lineRevenueUsdEquivCents } from "@/lib/admin/salon-finance";
+import { lineRevenueUsdEquivCents } from "@/lib/admin/salon-finance";
 import { fetchCashActivityForBusinessDate, fetchInventoryItem } from "@/lib/admin/salon-queries";
 import {
   buildAdminCorrectionRpcPayload,
@@ -384,23 +384,17 @@ export async function createProductSaleAction(input: {
       ? `${input.saleDate.trim()}T12:00:00.000Z`
       : new Date().toISOString();
 
-  const revUsd = lineRevenueUsdEquivCents(unitPrice, qty, cur);
-  const costUsdUnit = effectiveUnitCostUsdCents(item);
-  const gpUsd = Math.round(revUsd - qty * costUsdUnit);
-  const costSnapshot = item.avg_unit_cost_cents;
-
+  // Intentionally omit revenue_usd_equiv_cents / gross_profit_usd_cents / unit_cost_cents:
+  // trg_sales_before_insert recomputes them authoritatively (WAC + FX contract).
   const { error } = await supabase.from("sales").insert({
     inventory_item_id: input.inventoryItemId,
     qty,
     unit_price_cents: unitPrice,
-    unit_cost_cents: costSnapshot,
     currency: cur,
     sold_at: soldAt,
     payment_method: input.paymentMethod?.trim() || null,
     notes: input.notes?.trim() || null,
     customer_name: input.customerName?.trim() || null,
-    revenue_usd_equiv_cents: revUsd,
-    gross_profit_usd_cents: gpUsd,
     created_by: user?.id ?? null,
   });
 
@@ -467,18 +461,24 @@ export async function editRetailSaleAction(input: {
       role: ctx!.salonRole,
       saleId: input.saleId,
     });
-    const msg = error.message ?? "update_failed";
-    if (error.code === "PGRST202" || msg.includes("admin_edit_retail_sale")) {
+    const msg = (error.message ?? "transaction_failed").toLowerCase();
+    if (error.code === "PGRST202" || msg.includes("admin_edit_retail_sale") || msg.includes("could not find the function")) {
       return { ok: false, error: "migration_required" };
     }
     if (msg.includes("inventory_movements_movement_type_check") || msg.includes("sale_edit_restore")) {
       return { ok: false, error: "migration_required" };
     }
+    if (msg.includes("unauthorized") || msg.includes("42501") || msg.includes("forbidden")) {
+      return { ok: false, error: "unauthorized" };
+    }
+    if (msg.includes("sale_not_found") || msg.includes("invalid_sale_id")) return { ok: false, error: "sale_not_found" };
+    if (msg.includes("product_not_found") || msg.includes("not_found")) return { ok: false, error: "product_not_found" };
     if (msg.includes("insufficient_stock")) return { ok: false, error: "insufficient_stock" };
+    if (msg.includes("invalid_currency")) return { ok: false, error: "invalid_currency" };
+    if (msg.includes("invalid_price")) return { ok: false, error: "invalid_price" };
+    if (msg.includes("invalid_quantity") || msg.includes("invalid_qty")) return { ok: false, error: "invalid_quantity" };
     if (msg.includes("edit_reason_required")) return { ok: false, error: "edit_reason_required" };
-    if (msg.includes("not_found") || msg.includes("invalid_sale_id")) return { ok: false, error: "not_found" };
-    if (msg.includes("forbidden") || msg.includes("42501")) return { ok: false, error: "forbidden_manager_required" };
-    return { ok: false, error: msg };
+    return { ok: false, error: "transaction_failed" };
   }
 
   revalidateSalon();

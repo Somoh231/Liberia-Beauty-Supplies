@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { InventoryCatalogResetPanel } from "@/components/admin/inventory-catalog-reset-panel";
+import { OperationalDatasetResetPanel } from "@/components/admin/operational-dataset-reset-panel";
 import { OperationalSettingsForm } from "@/components/admin/operational-settings-form";
 import { requireAdminContext } from "@/lib/auth/admin-context";
 import { fetchOperationalSettings } from "@/lib/admin/salon-queries";
@@ -25,6 +26,7 @@ export default async function AdminOperationalSettingsPage() {
       {/* Forms stay readable-width (forms are out of scope this phase). */}
       <div className="max-w-3xl space-y-8">
         <OperationalSettingsForm row={row} />
+        {ctx.isOwner ? <OperationalDatasetResetPanel /> : null}
         {ctx.isOwner ? <InventoryCatalogResetPanel /> : null}
       </div>
     </div>

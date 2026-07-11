@@ -52,7 +52,7 @@ export async function parseInventoryWorkbookPreviewAction(formData: FormData): P
   }
 
   try {
-    const report = parseInventoryWorkbookBuffer(buffer, file.name, fx);
+    const report = parseInventoryWorkbookBuffer(buffer, file.name, fx, "catalog");
     return { ok: true, report };
   } catch (e) {
     logSalonAdminSupabaseFailure("action:parseInventoryWorkbookPreviewAction:parse", e, {

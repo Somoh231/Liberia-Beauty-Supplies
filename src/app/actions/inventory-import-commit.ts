@@ -97,20 +97,23 @@ export async function commitInventoryImportAction(input: {
     return { ok: false, error: "no_importable_rows" };
   }
 
-  const { data: batchId, error } = await supabase.rpc("commit_inventory_workbook_import", {
-    p_payload: {
-      filename: input.report.filename,
-      archive_existing: input.archiveExisting !== false,
-      fx_ngn_per_usd: input.report.fxNgnPerUsd,
-      fx_lrd_per_usd: input.report.fxLrdPerUsd,
-      parent_batch_id: input.parentBatchId ?? null,
-      import_rows: importRows,
-      unresolved_rows: unresolvedRows,
-      skipped_count: plan.skippedCount,
-      error_count: plan.errorCount,
-      category_totals: plan.categoryTotals,
+  const { data: batchId, error } = await supabase.rpc(
+    plan.catalogOnly ? "commit_inventory_catalog_seed" : "commit_inventory_workbook_import",
+    {
+      p_payload: {
+        filename: input.report.filename,
+        archive_existing: input.archiveExisting !== false,
+        fx_ngn_per_usd: input.report.fxNgnPerUsd,
+        fx_lrd_per_usd: input.report.fxLrdPerUsd,
+        parent_batch_id: input.parentBatchId ?? null,
+        import_rows: importRows,
+        unresolved_rows: unresolvedRows,
+        skipped_count: plan.skippedCount,
+        error_count: plan.errorCount,
+        category_totals: plan.categoryTotals,
+      },
     },
-  });
+  );
 
   if (error) {
     logSalonAdminSupabaseFailure("rpc:commit_inventory_workbook_import", error, {

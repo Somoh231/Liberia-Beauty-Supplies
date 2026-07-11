@@ -1106,6 +1106,7 @@ export async function fetchDailyCashReconciliationForDate(
       "id,business_date,expected_usd_cents,actual_usd_cents,variance_usd_cents,expected_lrd_cents,actual_lrd_cents,variance_lrd_cents,notes,reconciled_at,reconciled_by",
     )
     .eq("business_date", dayKey)
+    .is("superseded_at", null)
     .maybeSingle();
   if (error) throw new Error(error.message);
   return (data as DailyCashReconciliationRow | null) ?? null;

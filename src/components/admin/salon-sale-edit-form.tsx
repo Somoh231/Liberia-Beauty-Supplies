@@ -14,13 +14,19 @@ function errMsg(code: string): string {
   const map: Record<string, string> = {
     edit_reason_required: "Edit reason is required (at least 3 characters).",
     insufficient_stock: "Not enough stock for this quantity after adjustment.",
+    invalid_quantity: "Invalid quantity.",
     invalid_qty: "Invalid quantity.",
     invalid_price: "Invalid unit price.",
+    invalid_currency: "Invalid currency.",
     invalid_date: "Invalid sale date.",
+    unauthorized: "Only managers and owners can edit sales.",
     forbidden_manager_required: "Only managers and owners can edit sales.",
     migration_required:
-      "Sale edit is not available until migration 20260523120000_sales_edit_and_space_lease.sql is applied on Supabase.",
+      "Sale edit requires migration 20260525120000_operational_clean_restart.sql (or 20260523120000) on Supabase.",
+    sale_not_found: "Sale not found.",
+    product_not_found: "Product not found or archived replacement is not allowed.",
     not_found: "Sale or product not found.",
+    transaction_failed: "Sale edit failed and was rolled back. Try again or contact support.",
   };
   return map[code] ?? code.replace(/_/g, " ");
 }

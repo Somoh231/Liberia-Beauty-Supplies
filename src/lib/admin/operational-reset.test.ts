@@ -17,9 +17,11 @@ function sampleDataset(): SimulatedResetDataset {
     wipe: {
       sales_edit_log: [1, 2],
       inventory_movements: [1],
+      stock_movements: [1, 2],
       inventory_correction_log: [1],
       sales: [10, 11, 12],
       purchase_lines: [1],
+      purchase_items: [1, 2, 3],
       purchases: [1],
       weekly_product_sales: [1, 2],
       inventory_import_batches: [1],
@@ -57,13 +59,15 @@ describe("operational hard reset contracts", () => {
     expect(LEGACY_PRODUCT_SALE_TABLE_MAPPING.preservedSiblingTables).toContain("weekly_service_sales");
   });
 
-  it("documents FK-safe delete order", () => {
+  it("documents FK-safe delete order including stock_movements and purchase_items", () => {
     expect([...OPERATIONAL_RESET_DELETE_ORDER]).toEqual([
       "sales_edit_log",
       "inventory_movements",
+      "stock_movements",
       "inventory_correction_log",
       "sales",
       "purchase_lines",
+      "purchase_items",
       "purchases",
       "weekly_product_sales",
       "inventory_import_batches",
@@ -71,6 +75,13 @@ describe("operational hard reset contracts", () => {
       "daily_cash_reconciliations",
       "service_logs.product_usage_clear",
     ]);
+
+    expect(OPERATIONAL_RESET_DELETE_ORDER.indexOf("stock_movements")).toBeLessThan(
+      OPERATIONAL_RESET_DELETE_ORDER.indexOf("inventory_items"),
+    );
+    expect(OPERATIONAL_RESET_DELETE_ORDER.indexOf("purchase_items")).toBeLessThan(
+      OPERATIONAL_RESET_DELETE_ORDER.indexOf("inventory_items"),
+    );
   });
 
   it("requires preview, backup, phrase, and reauth before enable", () => {
@@ -121,7 +132,7 @@ describe("operational hard reset contracts", () => {
     expect(mapOperationalResetError("reauth_required")).toBe("reauth_required");
   });
 
-  it("empties wipe-scope tables and clears service product_usage while preserving service rows", () => {
+  it("empties wipe-scope tables including purchase_items and stock_movements", () => {
     const initial = sampleDataset();
     const preservedBefore = { ...initial.preserved };
     const result = simulateOperationalReset(initial);
@@ -133,6 +144,8 @@ describe("operational hard reset contracts", () => {
       expect(result.final.wipe[step]).toEqual([]);
     }
 
+    expect(result.final.wipe.stock_movements).toEqual([]);
+    expect(result.final.wipe.purchase_items).toEqual([]);
     expect(result.final.service_logs).toHaveLength(2);
     expect(result.final.service_logs.every((s) => s.product_usage.length === 0)).toBe(true);
     expect(result.final.service_logs.map((s) => s.revenue)).toEqual([5000, 2000]);
@@ -141,9 +154,11 @@ describe("operational hard reset contracts", () => {
     const zero: OperationalResetWipeCounts = {
       sales_edit_log: 0,
       inventory_movements: 0,
+      stock_movements: 0,
       inventory_correction_log: 0,
       sales: 0,
       purchase_lines: 0,
+      purchase_items: 0,
       purchases: 0,
       weekly_product_sales: 0,
       inventory_import_batches: 0,
@@ -164,9 +179,21 @@ describe("operational hard reset contracts", () => {
     // No partial wipe — snapshot restored
     expect(result.rolledBack.wipe.sales_edit_log).toEqual([1, 2]);
     expect(result.rolledBack.wipe.sales).toEqual([10, 11, 12]);
+    expect(result.rolledBack.wipe.stock_movements).toEqual([1, 2]);
+    expect(result.rolledBack.wipe.purchase_items).toEqual([1, 2, 3]);
     expect(result.rolledBack.wipe.inventory_items).toEqual([1, 2, 3]);
     expect(result.rolledBack.service_logs[0]?.product_usage).toHaveLength(1);
     expect(result.rolledBack.preserved).toEqual(initial.preserved);
+  });
+
+  it("forced failure after purchase_items still restores stock_movements and purchase_items", () => {
+    const initial = sampleDataset();
+    const result = simulateOperationalReset(initial, { failAfterStep: "purchase_items" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rolledBack.wipe.purchase_items).toEqual([1, 2, 3]);
+    expect(result.rolledBack.wipe.stock_movements).toEqual([1, 2]);
+    expect(result.rolledBack.wipe.inventory_items.length).toBe(3);
   });
 
   it("forced failure after deeper step still restores full snapshot", () => {
@@ -175,6 +202,8 @@ describe("operational hard reset contracts", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.rolledBack.wipe.purchases).toEqual([1]);
+    expect(result.rolledBack.wipe.purchase_items).toEqual([1, 2, 3]);
+    expect(result.rolledBack.wipe.stock_movements).toEqual([1, 2]);
     expect(result.rolledBack.wipe.inventory_items.length).toBe(3);
   });
 });

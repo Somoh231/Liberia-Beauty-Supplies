@@ -24,7 +24,7 @@ function errMsg(code: string): string {
     backup_confirmation_required: "Confirm that a database backup / export has been taken.",
     forbidden_owner_required: "Only the business owner can run this reset.",
     migration_required:
-      "Database migration required. Apply 20260526120000_operational_hard_reset.sql on Supabase.",
+      "Database migration required. Apply 20260529120000_operational_hard_reset_fk_blockers.sql on Supabase.",
     preview_failed: "Could not load reset preview counts.",
     reauth_required: "Re-enter your password to authorize this reset.",
     reauth_failed: "Password verification failed.",
@@ -41,9 +41,11 @@ function WipeCountsList({ title, counts }: { title: string; counts: OperationalR
       <ul className="mt-2 grid gap-1 sm:grid-cols-2">
         <li>Sale edit logs: {counts.sales_edit_log}</li>
         <li>Inventory movements: {counts.inventory_movements}</li>
+        <li>Stock movements: {counts.stock_movements ?? 0}</li>
         <li>Correction logs: {counts.inventory_correction_log}</li>
         <li>Sales: {counts.sales}</li>
         <li>Purchase lines: {counts.purchase_lines}</li>
+        <li>Purchase items: {counts.purchase_items ?? 0}</li>
         <li>Purchases: {counts.purchases}</li>
         <li>Weekly product sales: {counts.weekly_product_sales}</li>
         <li>Import batches: {counts.inventory_import_batches}</li>

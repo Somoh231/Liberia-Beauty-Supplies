@@ -6,9 +6,11 @@ export const OPERATIONAL_RESET_CONFIRM_PHRASE = "RESET SALES AND INVENTORY" as c
 export const OPERATIONAL_RESET_DELETE_ORDER = [
   "sales_edit_log",
   "inventory_movements",
+  "stock_movements",
   "inventory_correction_log",
   "sales",
   "purchase_lines",
+  "purchase_items",
   "purchases",
   "weekly_product_sales",
   "inventory_import_batches",
@@ -30,9 +32,11 @@ export const LEGACY_PRODUCT_SALE_TABLE_MAPPING = {
 export type OperationalResetWipeCounts = {
   sales_edit_log: number;
   inventory_movements: number;
+  stock_movements: number;
   inventory_correction_log: number;
   sales: number;
   purchase_lines: number;
+  purchase_items: number;
   purchases: number;
   weekly_product_sales: number;
   inventory_import_batches: number;
@@ -90,9 +94,11 @@ export function assertWipeCountsAreZero(counts: OperationalResetWipeCounts): boo
   return (
     counts.sales_edit_log === 0 &&
     counts.inventory_movements === 0 &&
+    counts.stock_movements === 0 &&
     counts.inventory_correction_log === 0 &&
     counts.sales === 0 &&
     counts.purchase_lines === 0 &&
+    counts.purchase_items === 0 &&
     counts.purchases === 0 &&
     counts.weekly_product_sales === 0 &&
     counts.inventory_import_batches === 0 &&

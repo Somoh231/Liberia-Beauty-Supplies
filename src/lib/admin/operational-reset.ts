@@ -25,6 +25,34 @@ export const OPERATIONAL_RESET_DELETE_ORDER = [
 ] as const;
 
 /**
+ * Production rejects unrestricted DELETE (sqlstate 21000).
+ * Required-table deletes must use these exact WHERE true forms (no TRUNCATE).
+ */
+export const OPERATIONAL_RESET_REQUIRED_DELETE_SQL = [
+  "delete from public.sales_edit_log where true",
+  "delete from public.inventory_movements where true",
+  "delete from public.inventory_correction_log where true",
+  "delete from public.sales where true",
+  "delete from public.purchase_lines where true",
+  "delete from public.purchases where true",
+  "delete from public.weekly_product_sales where true",
+  "delete from public.inventory_import_batches where true",
+  "delete from public.inventory_items where true",
+  "delete from public.daily_cash_reconciliations where true",
+] as const;
+
+/** Dynamic optional delete template used by safe_delete_table_if_exists. */
+export const OPERATIONAL_RESET_OPTIONAL_DELETE_SQL_TEMPLATE =
+  "delete from %s where true" as const;
+
+export function assertDeleteUsesWhereTrue(sql: string): boolean {
+  const normalized = sql.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized.startsWith("delete from ")) return false;
+  if (normalized.includes("truncate")) return false;
+  return normalized.endsWith(" where true") || normalized.includes(" where true;");
+}
+
+/**
  * Optional legacy tables: counted/deleted only via dynamic SQL after to_regclass.
  * Missing tables must not break preview counts or reset (count as 0 / skip delete).
  */

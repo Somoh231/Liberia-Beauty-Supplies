@@ -3,8 +3,11 @@ import {
   LEGACY_PRODUCT_SALE_TABLE_MAPPING,
   OPERATIONAL_RESET_CONFIRM_PHRASE,
   OPERATIONAL_RESET_DELETE_ORDER,
+  OPERATIONAL_RESET_OPTIONAL_DELETE_SQL_TEMPLATE,
   OPERATIONAL_RESET_OPTIONAL_LEGACY_TABLES,
   OPERATIONAL_RESET_PARENT_AFTER_CHILDREN,
+  OPERATIONAL_RESET_REQUIRED_DELETE_SQL,
+  assertDeleteUsesWhereTrue,
   assertWipeCountsAreZero,
   canEnableOperationalReset,
   formatForeignKeyViolationError,
@@ -290,5 +293,17 @@ describe("operational hard reset contracts", () => {
       "weekly_log_service_lines",
       "weekly_logs",
     ]);
+  });
+
+  it("requires DELETE ... WHERE true (not unrestricted DELETE or TRUNCATE)", () => {
+    for (const sql of OPERATIONAL_RESET_REQUIRED_DELETE_SQL) {
+      expect(assertDeleteUsesWhereTrue(sql)).toBe(true);
+      expect(sql.toLowerCase()).toContain(" where true");
+      expect(sql.toLowerCase()).not.toContain("truncate");
+    }
+    expect(OPERATIONAL_RESET_OPTIONAL_DELETE_SQL_TEMPLATE).toBe("delete from %s where true");
+    expect(assertDeleteUsesWhereTrue(OPERATIONAL_RESET_OPTIONAL_DELETE_SQL_TEMPLATE)).toBe(true);
+    expect(assertDeleteUsesWhereTrue("delete from public.sales")).toBe(false);
+    expect(assertDeleteUsesWhereTrue("truncate public.sales")).toBe(false);
   });
 });

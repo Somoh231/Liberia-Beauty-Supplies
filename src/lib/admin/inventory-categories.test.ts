@@ -31,6 +31,19 @@ const MIGRATION_PATH = path.join(
   "supabase/migrations/20260602120000_catalog_seed_unset_operational_fields.sql",
 );
 
+const NULLABLE_REORDER_MIGRATION_PATH = path.join(
+  process.cwd(),
+  "supabase/migrations/20260605120000_catalog_seed_nullable_reorder_fields.sql",
+);
+
+function executableSql(sql: string): string {
+  return sql
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => !/^\s*--/.test(line))
+    .join("\n");
+}
+
 function loadWorkbookFixture(): ArrayBuffer {
   if (!existsSync(WORKBOOK_FIXTURE_PATH)) {
     throw new Error(`Missing fixture at ${WORKBOOK_FIXTURE_PATH}`);
@@ -138,16 +151,42 @@ describe("catalog import archive safety", () => {
 describe("catalog seed migration safety", () => {
   it("does not DROP COLUMN ... CASCADE for generated inventory columns", () => {
     const sql = readFileSync(MIGRATION_PATH, "utf8");
-    const executableSql = sql
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .split("\n")
-      .filter((line) => !/^\s*--/.test(line))
-      .join("\n");
-    expect(executableSql).not.toMatch(/drop\s+column[^;]*\bcascade\b/i);
-    expect(executableSql).toMatch(/drop column if exists stock_status\s*;/i);
-    expect(executableSql).toMatch(/drop column if exists total_stock_value_minor\s*;/i);
-    expect(executableSql).toMatch(/coalesce\(\(p_payload->>'archive_existing'\)::boolean,\s*false\)/);
-    expect(executableSql).toMatch(/archive_existing_confirmation_required/);
+    const body = executableSql(sql);
+    expect(body).not.toMatch(/drop\s+column[^;]*\bcascade\b/i);
+    expect(body).toMatch(/drop column if exists stock_status\s*;/i);
+    expect(body).toMatch(/drop column if exists total_stock_value_minor\s*;/i);
+    expect(body).toMatch(/coalesce\(\(p_payload->>'archive_existing'\)::boolean,\s*false\)/);
+    expect(body).toMatch(/archive_existing_confirmation_required/);
+  });
+
+  it("catalog seed nullable-reorder migration allows null operational fields", () => {
+    const sql = readFileSync(NULLABLE_REORDER_MIGRATION_PATH, "utf8");
+    const body = executableSql(sql);
+
+    expect(body).toMatch(/alter column reorder_level drop not null/i);
+    expect(body).toMatch(/alter column reorder_point drop not null/i);
+    expect(body).toMatch(/alter column low_stock_threshold drop not null/i);
+    expect(body).toMatch(/alter column avg_unit_cost_cents drop not null/i);
+
+    // Existing completed rows must not be rewritten with fake zeros/5s
+    expect(body).not.toMatch(/update\s+public\.inventory_items/i);
+    expect(body).not.toMatch(/reorder_level\s*=\s*5/i);
+    expect(body).not.toMatch(/reorder_point\s*=\s*0/i);
+    expect(body).not.toMatch(/set\s+avg_unit_cost_cents\s*=\s*0/i);
+
+    // Catalog commit path still inserts NULL for unset operational figures
+    const seedSql = executableSql(readFileSync(MIGRATION_PATH, "utf8"));
+    expect(seedSql).toMatch(/insert into public\.inventory_items/i);
+    expect(seedSql).toMatch(/'needs_setup'/);
+  });
+
+  it("ready/manual products still receive reorder defaults when not needs_setup", () => {
+    const sql = readFileSync(NULLABLE_REORDER_MIGRATION_PATH, "utf8");
+    const body = executableSql(sql);
+    expect(body).toMatch(/is distinct from 'needs_setup'/i);
+    expect(body).toMatch(/new\.reorder_level := coalesce\(new\.reorder_point,\s*5\)/i);
+    expect(body).toMatch(/new\.reorder_point := new\.reorder_level/i);
+    expect(body).toMatch(/new\.low_stock_threshold := coalesce\(new\.reorder_level,\s*5\)/i);
   });
 });
 

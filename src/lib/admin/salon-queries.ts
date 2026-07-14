@@ -57,21 +57,21 @@ export type InventoryProductRow = {
   product_name: string;
   name: string;
   quantity_on_hand: number;
-  reorder_point: number;
-  reorder_level: number;
-  low_stock_threshold: number;
+  reorder_point: number | null;
+  reorder_level: number | null;
+  low_stock_threshold: number | null;
   stock_status: StockStatus | null;
-  avg_unit_cost_cents: number;
+  avg_unit_cost_cents: number | null;
   total_stock_value_minor: number | null;
   cost_currency: SalonCurrency;
   default_unit_price_cents: number | null;
   default_price_currency: SalonCurrency;
   fx_ngn_per_usd?: number | null;
-  landed_usd_cents_per_unit?: number;
+  landed_usd_cents_per_unit?: number | null;
   store_price_usd_cents?: number | null;
   sell_price_usd_cents?: number | null;
   sell_price_lrd_cents?: number | null;
-  weighted_avg_landed_usd_cents?: number;
+  weighted_avg_landed_usd_cents?: number | null;
   category: string | null;
   supplier_id: string | null;
   notes: string | null;
@@ -201,6 +201,8 @@ export type InventoryListFilters = {
   status?: StockStatus | "all";
   /** needs_setup | asset | ready_retail | all */
   focus?: "needs_setup" | "asset" | "ready_retail" | "all";
+  /** Exact workbook / inventory category name */
+  category?: string | null;
 };
 
 export type InventoryPageFilters = InventoryListFilters & {
@@ -243,6 +245,10 @@ export async function fetchInventoryProducts(
   }
   if (filters.status && filters.status !== "all") {
     q = q.eq("stock_status", filters.status);
+  }
+  const category = filters.category?.trim();
+  if (category) {
+    q = q.eq("category", category);
   }
   q = applyInventoryFocusFilter(q, filters.focus);
 
@@ -291,6 +297,10 @@ export async function fetchInventoryProductsPage(
   if (filters.status && filters.status !== "all") {
     q = q.eq("stock_status", filters.status);
   }
+  const category = filters.category?.trim();
+  if (category) {
+    q = q.eq("category", category);
+  }
   q = applyInventoryFocusFilter(q, filters.focus);
 
   const { data, error, count } = await q.range(from, to);
@@ -317,6 +327,22 @@ export async function fetchInventoryItem(supabase: SupabaseClient, id: string): 
   logAdminQueryResult("fetchInventoryItem", error, dataShapeOf(data));
   if (error) throw new Error(error.message);
   return (data as InventoryProductRow | null) ?? null;
+}
+
+/** Distinct non-null categories on live inventory (for New Product dropdown + overview). */
+export async function fetchInventoryCategoryNames(supabase: SupabaseClient): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("inventory_items")
+    .select("category")
+    .is("deleted_at", null)
+    .not("category", "is", null);
+  if (error) throw new Error(error.message);
+  const set = new Set<string>();
+  for (const row of data ?? []) {
+    const c = ((row as { category: string | null }).category ?? "").trim();
+    if (c) set.add(c);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
 }
 
 export type InventoryStatusSummary = {
@@ -632,7 +658,9 @@ export async function fetchDashboardRollup(supabase: SupabaseClient): Promise<Da
     const v =
       it.total_stock_value_minor != null
         ? it.total_stock_value_minor
-        : Math.round(Number(it.quantity_on_hand) * it.avg_unit_cost_cents);
+        : it.avg_unit_cost_cents != null
+          ? Math.round(Number(it.quantity_on_hand) * it.avg_unit_cost_cents)
+          : 0;
     const c = it.cost_currency;
     inventoryValueByCurrency[c] += v;
     inventoryValueUsdRollup += inventoryValueUsdCents(it, costOpts);

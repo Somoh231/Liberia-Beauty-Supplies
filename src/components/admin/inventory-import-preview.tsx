@@ -16,6 +16,7 @@ import {
   DEFAULT_OPERATIONAL_NGN_PER_USD,
 } from "@/lib/admin/pricing-engine";
 import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 const STATUS_LABEL: Record<InventoryImportValidationStatus, string> = {
@@ -33,6 +34,7 @@ const STATUS_CLS: Record<InventoryImportValidationStatus, string> = {
 };
 
 export function InventoryImportPreviewPanel() {
+  const router = useRouter();
   const [pending, start] = useTransition();
   const [committing, startCommit] = useTransition();
   const [err, setErr] = useState<string | null>(null);
@@ -258,7 +260,12 @@ export function InventoryImportPreviewPanel() {
                         const res = await commitInventoryImportAction({ report, overrides });
                         setCommitResult(res);
                         setConfirmOpen(false);
-                        if (!res.ok) setErr(res.error.replace(/_/g, " "));
+                        if (!res.ok) {
+                          setErr(res.error.replace(/_/g, " "));
+                          return;
+                        }
+                        router.push("/admin/inventory?imported=1");
+                        router.refresh();
                       });
                     }}
                     className="admin-btn-primary rounded-full px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] disabled:opacity-50"

@@ -5,6 +5,7 @@ import {
   type InventoryImportRowOverride,
   type UnresolvedRowSnapshot,
 } from "@/lib/admin/inventory-import/row-overrides";
+import { validateImportArchiveFlags } from "@/lib/admin/inventory-import/archive-flags";
 import type { InventoryImportPreviewReport } from "@/lib/admin/inventory-import/types";
 import { getAdminContext } from "@/lib/auth/admin-context";
 import { requireManagerOrAbove } from "@/lib/auth/admin-guards";
@@ -41,12 +42,16 @@ function revalidateInventoryImport() {
 
 /**
  * Phase 3 — transactional import of validated rows only.
- * Archives existing live inventory (first import), skips needs_review unless owner-confirmed (carton).
+ * Does not archive existing inventory unless archiveExisting + archiveExistingConfirmed
+ * are both explicitly true (destructive clean-restart flow only).
  */
 export async function commitInventoryImportAction(input: {
   report: InventoryImportPreviewReport;
   overrides: Record<string, InventoryImportRowOverride>;
+  /** Destructive: archive live rows before seed. Defaults false. */
   archiveExisting?: boolean;
+  /** Required when archiveExisting is true. */
+  archiveExistingConfirmed?: boolean;
   parentBatchId?: string | null;
   /** When set, only rows whose preview_id is in the parent batch unresolved list may import (follow-up). */
   deferredOnly?: boolean;
@@ -54,6 +59,12 @@ export async function commitInventoryImportAction(input: {
   const ctx = await getAdminContext();
   const deny = requireImportAdmin(ctx);
   if (deny) return { ok: false, error: deny };
+
+  const archiveCheck = validateImportArchiveFlags({
+    archiveExisting: input.archiveExisting,
+    archiveExistingConfirmed: input.archiveExistingConfirmed,
+  });
+  if (!archiveCheck.ok) return { ok: false, error: archiveCheck.error };
 
   const plan = buildImportCommitPlan(input.report, input.overrides ?? {});
 
@@ -102,7 +113,8 @@ export async function commitInventoryImportAction(input: {
     {
       p_payload: {
         filename: input.report.filename,
-        archive_existing: input.archiveExisting !== false,
+        archive_existing: archiveCheck.flags.archive_existing,
+        archive_existing_confirmed: archiveCheck.flags.archive_existing_confirmed,
         fx_ngn_per_usd: input.report.fxNgnPerUsd,
         fx_lrd_per_usd: input.report.fxLrdPerUsd,
         parent_batch_id: input.parentBatchId ?? null,

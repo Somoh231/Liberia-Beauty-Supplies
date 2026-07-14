@@ -5,6 +5,7 @@ import { SalonInventoryEditForm } from "@/components/admin/salon-inventory-form"
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchInventoryItem, type InventoryMovementRow, type SaleRow } from "@/lib/admin/salon-queries";
 import { loadInventoryDetailBootstrap, toSupplierOptions } from "@/lib/admin/inventory-form-bootstrap";
+import { inventoryCategoryToSlug } from "@/lib/admin/inventory-categories";
 import { formatSalonMoney, type StockStatus } from "@/lib/admin/salon-format";
 import {
   effectiveUnitCostUsdCents,
@@ -15,6 +16,7 @@ import {
   unitGrossMarginPct,
   unitGrossProfitUsdCents,
 } from "@/lib/admin/pricing-engine";
+import { hasInventoryCostBasis } from "@/lib/admin/inventory-sellability";
 import { cn } from "@/lib/utils";
 import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
@@ -93,20 +95,25 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
             ? "Out of stock"
             : "—";
 
-  const usdUnit = effectiveUnitCostUsdCents(item, { operationalFx: opRates });
-  const invVal = inventoryValueUsdCents(item, { operationalFx: opRates });
-  const grossUnit = unitGrossProfitUsdCents(item, { operationalFx: opRates });
-  const marginPct = unitGrossMarginPct(item, { operationalFx: opRates });
+  const usdUnit = hasInventoryCostBasis(item) ? effectiveUnitCostUsdCents(item, { operationalFx: opRates }) : null;
+  const invVal = hasInventoryCostBasis(item) ? inventoryValueUsdCents(item, { operationalFx: opRates }) : null;
+  const grossUnit = hasInventoryCostBasis(item) ? unitGrossProfitUsdCents(item, { operationalFx: opRates }) : null;
+  const marginPct = hasInventoryCostBasis(item) ? unitGrossMarginPct(item, { operationalFx: opRates }) : null;
   const fxNgn = item.fx_ngn_per_usd != null && item.fx_ngn_per_usd > 0 ? Number(item.fx_ngn_per_usd) : opRates.ngnPerUsd;
   const landedAddonUsdCents = item.landed_usd_cents_per_unit ?? 0;
-  let supplierUsdOnlyCents = 0;
-  if (item.cost_currency === "NGN") supplierUsdOnlyCents = ngnKoboToUsdCents(item.avg_unit_cost_cents, fxNgn);
-  else if (item.cost_currency === "USD") supplierUsdOnlyCents = Math.round(item.avg_unit_cost_cents);
-  else if (item.cost_currency === "LRD") supplierUsdOnlyCents = Math.round(item.avg_unit_cost_cents / opRates.lrdPerUsd);
+  let supplierUsdOnlyCents: number | null = null;
+  if (item.avg_unit_cost_cents != null && item.avg_unit_cost_cents > 0) {
+    if (item.cost_currency === "NGN") supplierUsdOnlyCents = ngnKoboToUsdCents(item.avg_unit_cost_cents, fxNgn);
+    else if (item.cost_currency === "USD") supplierUsdOnlyCents = Math.round(item.avg_unit_cost_cents);
+    else if (item.cost_currency === "LRD") supplierUsdOnlyCents = Math.round(item.avg_unit_cost_cents / opRates.lrdPerUsd);
+  }
+  const categoryHref = item.category
+    ? `/admin/inventory/categories/${inventoryCategoryToSlug(item.category)}`
+    : "/admin/inventory";
   return (
     <div className="mx-auto max-w-6xl space-y-8 pb-10">
-      <Link href="/admin/inventory" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--admin-accent)]">
-        ← Inventory
+      <Link href={categoryHref} className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--admin-accent)]">
+        ← {item.category ?? "Inventory"}
       </Link>
       {loadErrors.length > 0 ? (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">
@@ -142,7 +149,11 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <dt className="text-[10px] uppercase tracking-[0.14em] text-white/40">Supplier unit cost</dt>
-            <dd className="mt-1 text-white">{formatSalonMoney(item.avg_unit_cost_cents, item.cost_currency)}</dd>
+            <dd className="mt-1 text-white">
+              {item.avg_unit_cost_cents != null && item.avg_unit_cost_cents > 0
+                ? formatSalonMoney(item.avg_unit_cost_cents, item.cost_currency)
+                : "Not set"}
+            </dd>
           </div>
           {item.cost_currency === "NGN" ? (
             <div>
@@ -152,15 +163,21 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
           ) : null}
           <div>
             <dt className="text-[10px] uppercase tracking-[0.14em] text-white/40">Supplier → USD (excl. landed)</dt>
-            <dd className="mt-1 text-white">{formatSalonMoney(supplierUsdOnlyCents, "USD")}</dd>
+            <dd className="mt-1 text-white">
+              {supplierUsdOnlyCents != null ? formatSalonMoney(supplierUsdOnlyCents, "USD") : "Not set"}
+            </dd>
           </div>
           <div>
             <dt className="text-[10px] uppercase tracking-[0.14em] text-white/40">Landed uplift (USD / unit)</dt>
-            <dd className="mt-1 text-white">{formatSalonMoney(landedAddonUsdCents, "USD")}</dd>
+            <dd className="mt-1 text-white">
+              {item.landed_usd_cents_per_unit != null && item.landed_usd_cents_per_unit > 0
+                ? formatSalonMoney(landedAddonUsdCents, "USD")
+                : "Not set"}
+            </dd>
           </div>
           <div>
             <dt className="text-[10px] uppercase tracking-[0.14em] text-white/40">Landed (WAC) USD / unit</dt>
-            <dd className="mt-1 text-white">{formatSalonMoney(usdUnit, "USD")}</dd>
+            <dd className="mt-1 text-white">{usdUnit != null ? formatSalonMoney(usdUnit, "USD") : "Not set"}</dd>
           </div>
           <div>
             <dt className="text-[10px] uppercase tracking-[0.14em] text-white/40">Wholesale USD</dt>
@@ -190,7 +207,7 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
           </div>
           <div className="sm:col-span-2 lg:col-span-3">
             <dt className="text-[10px] uppercase tracking-[0.14em] text-white/40">Inventory value (USD, at WAC)</dt>
-            <dd className="mt-1 text-white">{formatSalonMoney(invVal, "USD")}</dd>
+            <dd className="mt-1 text-white">{invVal != null ? formatSalonMoney(invVal, "USD") : "Not set"}</dd>
           </div>
         </dl>
         {staff ? (

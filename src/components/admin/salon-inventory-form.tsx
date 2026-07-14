@@ -11,6 +11,8 @@ import {
   isInvalidManualNgnPerUsdField,
   unitGrossProfitUsdCents,
 } from "@/lib/admin/pricing-engine";
+import { buildInventorySetupChecklist } from "@/lib/admin/inventory-categories";
+import { inventoryNeedsSetup } from "@/lib/admin/inventory-sellability";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
@@ -29,18 +31,20 @@ function currencySelect(name: string, defaultValue: SalonCurrency) {
 
 export function SalonInventoryNewForm({
   supplierOptions,
+  categoryOptions = [],
   fxSummaryLine,
 }: {
   supplierOptions: { id: string; name: string }[];
+  categoryOptions?: string[];
   fxSummaryLine?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
-  const [avgCost, setAvgCost] = useState("0");
+  const [avgCost, setAvgCost] = useState("");
   const [costCurrency, setCostCurrency] = useState<SalonCurrency>("NGN");
   const [fxNgn, setFxNgn] = useState("");
-  const [landedUsd, setLandedUsd] = useState("0");
+  const [landedUsd, setLandedUsd] = useState("");
   const [storeUsd, setStoreUsd] = useState("");
   const [sellUsd, setSellUsd] = useState("");
   const [sellLrd, setSellLrd] = useState("");
@@ -85,9 +89,9 @@ export function SalonInventoryNewForm({
             category: String(fd.get("category") ?? "") || null,
             notes: String(fd.get("notes") ?? "") || null,
             openingQty: String(fd.get("opening_qty") ?? "") || null,
-            reorderLevel: String(fd.get("reorder_level") ?? "5"),
-            lowStockThreshold: String(fd.get("low_stock_threshold") ?? "5"),
-            avgUnitCost: String(fd.get("avg_cost") ?? "0"),
+            reorderLevel: String(fd.get("reorder_level") ?? "") || null,
+            lowStockThreshold: String(fd.get("low_stock_threshold") ?? "") || null,
+            avgUnitCost: String(fd.get("avg_cost") ?? "") || null,
             costCurrency: normalizeCurrency(String(fd.get("cost_currency") ?? "NGN")),
             sellingPrice: String(fd.get("sell_price") ?? "") || null,
             sellingPriceCurrency: normalizeCurrency(String(fd.get("price_currency") ?? "NGN")),
@@ -108,12 +112,16 @@ export function SalonInventoryNewForm({
       }}
     >
       {err ? <p className="text-sm text-red-300">{err}</p> : null}
+      <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/55">
+        This is only for products <span className="text-white/80">not already in the workbook catalog</span>. Prefer{" "}
+        <span className="text-white/80">Import workbook catalog</span> for the approved 177 products.
+      </p>
       <p className="text-xs text-white/45">
         Product code is assigned automatically (001, 002, …) and is never reused after delete.
       </p>
       <label className="block text-xs text-white/55">
         Product name
-        <input name="product_name" required className={field} placeholder="e.g. Human Hair curly 16" />
+        <input name="product_name" required className={field} placeholder="e.g. Specialty addon name" />
       </label>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block text-xs text-white/55">
@@ -126,8 +134,17 @@ export function SalonInventoryNewForm({
         </label>
       </div>
       <label className="block text-xs text-white/55">
-        Category (optional)
-        <input name="category" className={field} />
+        Category
+        <select name="category" className={field} required defaultValue="">
+          <option value="" disabled>
+            Select category…
+          </option>
+          {categoryOptions.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
       </label>
       <label className="block text-xs text-white/55">
         Default supplier (optional)
@@ -162,12 +179,12 @@ export function SalonInventoryNewForm({
           />
         </label>
         <label className="block text-xs text-white/55">
-          Reorder level
-          <input name="reorder_level" type="number" step="0.01" min="0" defaultValue="5" className={field} required />
+          Reorder level (optional)
+          <input name="reorder_level" type="number" step="0.01" min="0" className={field} placeholder="Leave blank if unset" />
         </label>
         <label className="block text-xs text-white/55">
-          Low stock threshold
-          <input name="low_stock_threshold" type="number" step="0.01" min="0" defaultValue="5" className={field} required />
+          Low stock threshold (optional)
+          <input name="low_stock_threshold" type="number" step="0.01" min="0" className={field} placeholder="Leave blank if unset" />
         </label>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -181,7 +198,7 @@ export function SalonInventoryNewForm({
             value={avgCost}
             onChange={(e) => setAvgCost(e.target.value)}
             className={field}
-            required
+            placeholder="Not set"
           />
         </label>
         <label className="block text-xs text-white/55">
@@ -313,10 +330,17 @@ export function SalonInventoryEditForm({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
-  const [avgCost, setAvgCost] = useState(() => (item.avg_unit_cost_cents / 100).toFixed(2));
+  const needsSetupItem = inventoryNeedsSetup(item) || item.setup_status === "needs_setup";
+  const moneyUnset = (cents: number | null | undefined) =>
+    cents == null || (needsSetupItem && cents === 0);
+  const [avgCost, setAvgCost] = useState(() =>
+    moneyUnset(item.avg_unit_cost_cents) ? "" : (item.avg_unit_cost_cents! / 100).toFixed(2),
+  );
   const [costCurrency, setCostCurrency] = useState<SalonCurrency>(() => item.cost_currency);
   const [fxNgn, setFxNgn] = useState(() => (item.fx_ngn_per_usd != null ? String(item.fx_ngn_per_usd) : ""));
-  const [landedUsd, setLandedUsd] = useState(() => ((item.landed_usd_cents_per_unit ?? 0) / 100).toFixed(2));
+  const [landedUsd, setLandedUsd] = useState(() =>
+    moneyUnset(item.landed_usd_cents_per_unit) ? "" : ((item.landed_usd_cents_per_unit ?? 0) / 100).toFixed(2),
+  );
   const [storeUsd, setStoreUsd] = useState(() =>
     item.store_price_usd_cents != null ? (item.store_price_usd_cents / 100).toFixed(2) : "",
   );
@@ -336,10 +360,12 @@ export function SalonInventoryEditForm({
   const [auditReason, setAuditReason] = useState("");
 
   useEffect(() => {
-    setAvgCost((item.avg_unit_cost_cents / 100).toFixed(2));
+    const ns = inventoryNeedsSetup(item) || item.setup_status === "needs_setup";
+    const unset = (cents: number | null | undefined) => cents == null || (ns && cents === 0);
+    setAvgCost(unset(item.avg_unit_cost_cents) ? "" : (item.avg_unit_cost_cents! / 100).toFixed(2));
     setCostCurrency(item.cost_currency);
     setFxNgn(item.fx_ngn_per_usd != null ? String(item.fx_ngn_per_usd) : "");
-    setLandedUsd(((item.landed_usd_cents_per_unit ?? 0) / 100).toFixed(2));
+    setLandedUsd(unset(item.landed_usd_cents_per_unit) ? "" : ((item.landed_usd_cents_per_unit ?? 0) / 100).toFixed(2));
     setStoreUsd(item.store_price_usd_cents != null ? (item.store_price_usd_cents / 100).toFixed(2) : "");
     setSellUsd(item.sell_price_usd_cents != null ? (item.sell_price_usd_cents / 100).toFixed(2) : "");
     setSellLrd(item.sell_price_lrd_cents != null ? (item.sell_price_lrd_cents / 100).toFixed(2) : "");
@@ -352,6 +378,21 @@ export function SalonInventoryEditForm({
     setArchived(item.deleted_at != null);
   }, [item]);
 
+  const setupChecklist = useMemo(
+    () =>
+      buildInventorySetupChecklist({
+        ...item,
+        avg_unit_cost_cents: avgCost === "" ? null : Math.round((Number.parseFloat(avgCost) || 0) * 100),
+        sell_price_usd_cents: sellUsd === "" ? null : Math.round((Number.parseFloat(sellUsd) || 0) * 100),
+        sell_price_lrd_cents: sellLrd === "" ? null : Math.round((Number.parseFloat(sellLrd) || 0) * 100),
+        store_price_usd_cents: storeUsd === "" ? null : Math.round((Number.parseFloat(storeUsd) || 0) * 100),
+        weighted_avg_landed_usd_cents: wacUsd === "" ? null : Math.round((Number.parseFloat(wacUsd) || 0) * 100),
+        landed_usd_cents_per_unit: landedUsd === "" ? null : Math.round((Number.parseFloat(landedUsd) || 0) * 100),
+        quantity_on_hand: Number.parseFloat(qtyHand === "" ? "0" : qtyHand),
+        supplier_id: item.supplier_id,
+      }),
+    [item, avgCost, sellUsd, sellLrd, storeUsd, wacUsd, landedUsd, qtyHand],
+  );
   const needsAuditReason = useMemo(() => {
     const qh = Number.parseFloat(qtyHand === "" ? "0" : qtyHand);
     const costCents = Math.round((Number.parseFloat(avgCost) || 0) * 100);
@@ -419,10 +460,10 @@ export function SalonInventoryEditForm({
             supplierId: String(fd.get("supplier_id") ?? "") || null,
             category: String(fd.get("category") ?? "") || null,
             notes: String(fd.get("notes") ?? "") || null,
-            reorderLevel: String(fd.get("reorder_level") ?? "0"),
-            lowStockThreshold: String(fd.get("low_stock_threshold") ?? "5"),
+            reorderLevel: String(fd.get("reorder_level") ?? ""),
+            lowStockThreshold: String(fd.get("low_stock_threshold") ?? ""),
             quantityOnHand: String(fd.get("quantity_on_hand") ?? "0"),
-            avgUnitCost: String(fd.get("avg_cost") ?? "0"),
+            avgUnitCost: String(fd.get("avg_cost") ?? ""),
             costCurrency: normalizeCurrency(String(fd.get("cost_currency") ?? item.cost_currency)),
             sellingPrice: String(fd.get("sell_price") ?? "") || null,
             sellingPriceCurrency: normalizeCurrency(String(fd.get("price_currency") ?? item.default_price_currency)),
@@ -447,6 +488,24 @@ export function SalonInventoryEditForm({
       }}
     >
       {err ? <p className="text-sm text-red-300">{err}</p> : null}
+      {needsSetupItem ? (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.07] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-100/90">Setup required</p>
+          <p className="mt-1 text-xs text-white/55">
+            Catalog name and category are preloaded. Enter supplier, cost, and selling price to mark this product ready
+            for sale. Blank financial fields mean Not set — not $0.
+          </p>
+          <ul className="mt-3 space-y-1.5 text-xs">
+            {setupChecklist.map((c) => (
+              <li key={c.key} className={c.complete ? "text-emerald-200/80" : "text-white/55"}>
+                <span className="mr-2 font-mono text-[10px]">{c.complete ? "✓" : "○"}</span>
+                {c.label}
+                {c.required && !c.complete ? <span className="ml-1 text-amber-200/80">required</span> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div className="rounded-xl border border-[var(--admin-accent)]/25 bg-[var(--admin-accent)]/[0.06] px-4 py-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--admin-accent)]">Admin correction</p>
         <p className="mt-1 text-xs text-white/55">
@@ -455,6 +514,9 @@ export function SalonInventoryEditForm({
         {item.import_batch_id ? (
           <p className="mt-2 font-mono text-[10px] text-white/40">Import batch {item.import_batch_id}</p>
         ) : null}
+        <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-white/45">
+          Type: {item.item_type === "asset" ? "Asset" : "Retail"} · Setup: {item.setup_status ?? "—"}
+        </p>
       </div>
       <p className="text-xs text-white/45">
         Code <span className="font-mono text-white/70">{item.product_code}</span> · Status is calculated from quantity and low-stock threshold.
@@ -496,12 +558,12 @@ export function SalonInventoryEditForm({
       </div>
       <label className="block text-xs text-white/55">
         Category
-        <input name="category" defaultValue={item.category ?? ""} className={field} />
+        <input name="category" defaultValue={item.category ?? ""} className={field} readOnly={!!item.import_batch_id} />
       </label>
       <label className="block text-xs text-white/55">
-        Default supplier
+        Default supplier {needsSetupItem ? <span className="text-amber-200/80">(required for retail setup)</span> : null}
         <select name="supplier_id" defaultValue={item.supplier_id ?? ""} className={field}>
-          <option value="">—</option>
+          <option value="">Not set</option>
           {supplierOptions.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -561,7 +623,15 @@ export function SalonInventoryEditForm({
         </label>
         <label className="block text-xs text-white/55">
           Reorder level
-          <input name="reorder_level" type="number" step="0.01" min="0" defaultValue={item.reorder_level} className={field} required />
+          <input
+            name="reorder_level"
+            type="number"
+            step="0.01"
+            min="0"
+            defaultValue={item.reorder_level ?? ""}
+            className={field}
+            placeholder="Not set"
+          />
         </label>
         <label className="block text-xs text-white/55">
           Low stock threshold
@@ -570,15 +640,15 @@ export function SalonInventoryEditForm({
             type="number"
             step="0.01"
             min="0"
-            defaultValue={item.low_stock_threshold}
+            defaultValue={item.low_stock_threshold ?? ""}
             className={field}
-            required
+            placeholder="Not set"
           />
         </label>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block text-xs text-white/55">
-          Supplier unit cost (avg)
+          Supplier unit cost (avg) {needsSetupItem ? <span className="text-amber-200/80">(required)</span> : null}
           <input
             name="avg_cost"
             type="number"
@@ -587,7 +657,7 @@ export function SalonInventoryEditForm({
             value={avgCost}
             onChange={(e) => setAvgCost(e.target.value)}
             className={field}
-            required
+            placeholder="Not set"
           />
         </label>
         <label className="block text-xs text-white/55">

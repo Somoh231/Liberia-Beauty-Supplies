@@ -9,10 +9,10 @@ export type InventoryAdminCorrectionInput = {
   supplierId?: string | null;
   category?: string | null;
   notes?: string | null;
-  reorderLevel: number;
-  lowStockThreshold: number;
+  reorderLevel: number | null;
+  lowStockThreshold: number | null;
   quantityOnHand: number;
-  avgUnitCostCents: number;
+  avgUnitCostCents: number | null;
   costCurrency: string;
   defaultUnitPriceCents: number | null;
   defaultPriceCurrency: string;

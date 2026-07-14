@@ -32,9 +32,9 @@ import {
 
 /** Minimal row shape for costing — avoids circular imports with `salon-queries`. */
 export type InventoryCostingInput = {
-  avg_unit_cost_cents: number;
+  avg_unit_cost_cents: number | null;
   cost_currency: SalonCurrency;
-  landed_usd_cents_per_unit?: number;
+  landed_usd_cents_per_unit?: number | null;
   fx_ngn_per_usd?: number | null;
   weighted_avg_landed_usd_cents?: number | null;
   sell_price_usd_cents?: number | null;
@@ -187,17 +187,20 @@ export function effectiveUnitCostUsdCents(item: InventoryCostingInput, opts?: Ef
   }
 
   const landed = item.landed_usd_cents_per_unit ?? 0;
+  const avg = item.avg_unit_cost_cents;
+  if (avg == null || avg <= 0) return landed;
+
   if (item.cost_currency === "USD") {
-    return Math.max(0, Math.round(item.avg_unit_cost_cents) + landed);
+    return Math.max(0, Math.round(avg) + landed);
   }
   if (item.cost_currency === "NGN") {
     const fx = resolveNgnFx(item.fx_ngn_per_usd, opts?.operationalFx);
-    const usd = ngnKoboToUsdCents(item.avg_unit_cost_cents, fx);
+    const usd = ngnKoboToUsdCents(avg, fx);
     return usd + landed;
   }
   if (item.cost_currency === "LRD") {
     const perUsd = resolveLrdFx(opts?.operationalFx);
-    const usd = Math.round(item.avg_unit_cost_cents / perUsd);
+    const usd = Math.round(avg / perUsd);
     return usd + landed;
   }
   return landed;
@@ -266,6 +269,7 @@ export function supplierUnitCostToUsdCentsExclLanded(
   operationalFx?: OperationalFxRates,
 ): number {
   const { avg_unit_cost_cents, cost_currency, fx_ngn_per_usd } = item;
+  if (avg_unit_cost_cents == null || avg_unit_cost_cents <= 0) return 0;
   if (cost_currency === "USD") return Math.max(0, Math.round(avg_unit_cost_cents));
   if (cost_currency === "NGN") {
     const fx = resolveNgnFx(fx_ngn_per_usd, operationalFx);

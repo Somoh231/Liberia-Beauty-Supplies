@@ -92,6 +92,11 @@ export function resolvePageMeta(pathname: string): { title: string; crumbs: stri
     { test: (p) => p.startsWith("/admin/sales-log"), title: "Sales Log", crumbs: ["Sales Log"] },
     { test: (p) => p.startsWith("/admin/inventory/import"), title: "Import Inventory", crumbs: ["Inventory", "Import"] },
     { test: (p) => p.startsWith("/admin/inventory/new"), title: "New Product", crumbs: ["Inventory", "New Product"] },
+    {
+      test: (p) => p.startsWith("/admin/inventory/categories/"),
+      title: "Category",
+      crumbs: ["Inventory", "Category"],
+    },
     { test: (p) => /^\/admin\/inventory\/[^/]+$/.test(p), title: "Product", crumbs: ["Inventory", "Product"] },
     { test: (p) => p.startsWith("/admin/inventory"), title: "Inventory", crumbs: ["Inventory"] },
     { test: (p) => p.startsWith("/admin/purchases/new"), title: "New Purchase", crumbs: ["Purchases", "New Purchase"] },

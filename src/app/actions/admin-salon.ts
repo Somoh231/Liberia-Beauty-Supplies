@@ -134,9 +134,9 @@ export async function createInventoryItemAction(input: {
   category?: string | null;
   notes?: string | null;
   openingQty?: string | null;
-  reorderLevel: string;
-  lowStockThreshold: string;
-  avgUnitCost: string;
+  reorderLevel?: string | null;
+  lowStockThreshold?: string | null;
+  avgUnitCost?: string | null;
   costCurrency: SalonCurrency;
   sellingPrice?: string | null;
   sellingPriceCurrency?: SalonCurrency;
@@ -152,13 +152,17 @@ export async function createInventoryItemAction(input: {
   const productName = input.productName?.trim() ?? "";
   if (productName.length < 2) return { ok: false, error: "invalid_name" };
   if (input.supplierId && !isUuid(input.supplierId)) return { ok: false, error: "invalid_supplier" };
+  if (!input.category?.trim()) return { ok: false, error: "invalid_category" };
 
-  const rl = parseQty(input.reorderLevel);
-  const lt = parseQty(input.lowStockThreshold);
-  if (rl == null || rl < 0) return { ok: false, error: "invalid_reorder_level" };
-  if (lt == null || lt < 0) return { ok: false, error: "invalid_low_threshold" };
-  const cost = parseMoneyToCents(input.avgUnitCost);
-  if (cost == null) return { ok: false, error: "invalid_cost" };
+  const rlRaw = (input.reorderLevel ?? "").trim();
+  const ltRaw = (input.lowStockThreshold ?? "").trim();
+  const rl = rlRaw === "" ? null : parseQty(rlRaw);
+  const lt = ltRaw === "" ? null : parseQty(ltRaw);
+  if (rlRaw !== "" && (rl == null || rl < 0)) return { ok: false, error: "invalid_reorder_level" };
+  if (ltRaw !== "" && (lt == null || lt < 0)) return { ok: false, error: "invalid_low_threshold" };
+  const costRaw = (input.avgUnitCost ?? "").trim();
+  const cost = costRaw === "" ? null : parseMoneyToCents(costRaw);
+  if (costRaw !== "" && cost == null) return { ok: false, error: "invalid_cost" };
   const cc = normalizeCurrency(input.costCurrency);
   const defPrice = input.sellingPrice ? parseMoneyToCents(input.sellingPrice) : null;
   const pc = normalizeCurrency(input.sellingPriceCurrency ?? cc);
@@ -166,8 +170,10 @@ export async function createInventoryItemAction(input: {
   if (openQ == null || openQ < 0) return { ok: false, error: "invalid_opening_qty" };
 
   const fx = parseFxNgnPerUsd(input.fxNgnPerUsd);
-  const landed = input.landedUsd != null && input.landedUsd !== "" ? parseMoneyToCents(input.landedUsd) : 0;
-  if (landed == null || landed < 0) return { ok: false, error: "invalid_landed" };
+  const landedRaw = input.landedUsd != null && input.landedUsd !== "" ? parseMoneyToCents(input.landedUsd) : null;
+  if (input.landedUsd != null && input.landedUsd !== "" && (landedRaw == null || landedRaw < 0)) {
+    return { ok: false, error: "invalid_landed" };
+  }
   const storeUsd = input.storePriceUsd != null && input.storePriceUsd !== "" ? parseMoneyToCents(input.storePriceUsd) : null;
   const sellUsd = input.sellPriceUsd != null && input.sellPriceUsd !== "" ? parseMoneyToCents(input.sellPriceUsd) : null;
   const sellLd = input.sellPriceLd != null && input.sellPriceLd !== "" ? parseMoneyToCents(input.sellPriceLd) : null;
@@ -184,7 +190,7 @@ export async function createInventoryItemAction(input: {
       sku: input.sku?.trim() || null,
       unit: (input.unit?.trim() || "each").slice(0, 32),
       supplier_id: input.supplierId && isUuid(input.supplierId) ? input.supplierId : null,
-      category: input.category?.trim() || null,
+      category: input.category.trim(),
       notes: input.notes?.trim() || null,
       reorder_level: rl,
       reorder_point: rl,
@@ -195,10 +201,13 @@ export async function createInventoryItemAction(input: {
       default_unit_price_cents: defaultUnit ?? defPrice,
       default_price_currency: defaultUnit != null ? defaultCur : pc,
       fx_ngn_per_usd: fx,
-      landed_usd_cents_per_unit: landed ?? 0,
+      landed_usd_cents_per_unit: landedRaw,
+      weighted_avg_landed_usd_cents: landedRaw,
       store_price_usd_cents: storeUsd,
       sell_price_usd_cents: sellUsd,
       sell_price_lrd_cents: sellLd,
+      item_type: "retail",
+      setup_status: "needs_setup",
       active: true,
     })
     .select("id")
@@ -247,21 +256,27 @@ export async function updateInventoryItemAction(input: {
   const productName = input.productName?.trim() ?? "";
   if (productName.length < 2) return { ok: false, error: "invalid_name" };
 
-  const rl = parseQty(input.reorderLevel);
-  const lt = parseQty(input.lowStockThreshold);
+  const rlRaw = (input.reorderLevel ?? "").trim();
+  const ltRaw = (input.lowStockThreshold ?? "").trim();
+  const rl = rlRaw === "" ? null : parseQty(rlRaw);
+  const lt = ltRaw === "" ? null : parseQty(ltRaw);
   const qoh = parseQty(input.quantityOnHand);
-  if (rl == null || rl < 0) return { ok: false, error: "invalid_reorder_level" };
-  if (lt == null || lt < 0) return { ok: false, error: "invalid_low_threshold" };
+  if (rlRaw !== "" && (rl == null || rl < 0)) return { ok: false, error: "invalid_reorder_level" };
+  if (ltRaw !== "" && (lt == null || lt < 0)) return { ok: false, error: "invalid_low_threshold" };
   if (qoh == null || qoh < 0) return { ok: false, error: "invalid_quantity" };
-  const cost = parseMoneyToCents(input.avgUnitCost);
-  if (cost == null) return { ok: false, error: "invalid_cost" };
+  const costRaw = (input.avgUnitCost ?? "").trim();
+  const cost = costRaw === "" ? null : parseMoneyToCents(costRaw);
+  if (costRaw !== "" && cost == null) return { ok: false, error: "invalid_cost" };
   const cc = normalizeCurrency(input.costCurrency);
   const defPrice = input.sellingPrice ? parseMoneyToCents(input.sellingPrice) : null;
   const pc = normalizeCurrency(input.sellingPriceCurrency ?? cc);
 
   const fx = parseFxNgnPerUsd(input.fxNgnPerUsd);
-  const landed = input.landedUsd != null && input.landedUsd !== "" ? parseMoneyToCents(input.landedUsd) : 0;
-  if (landed == null || landed < 0) return { ok: false, error: "invalid_landed" };
+  const landed =
+    input.landedUsd != null && input.landedUsd !== "" ? parseMoneyToCents(input.landedUsd) : null;
+  if (input.landedUsd != null && input.landedUsd !== "" && (landed == null || landed < 0)) {
+    return { ok: false, error: "invalid_landed" };
+  }
   const storeUsd = input.storePriceUsd != null && input.storePriceUsd !== "" ? parseMoneyToCents(input.storePriceUsd) : null;
   const sellUsd = input.sellPriceUsd != null && input.sellPriceUsd !== "" ? parseMoneyToCents(input.sellPriceUsd) : null;
   const sellLd = input.sellPriceLd != null && input.sellPriceLd !== "" ? parseMoneyToCents(input.sellPriceLd) : null;

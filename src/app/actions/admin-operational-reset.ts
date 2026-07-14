@@ -134,5 +134,3 @@ export async function resetSalesAndInventoryAction(input: {
   revalidateAfterReset();
   return { ok: true, result: data as OperationalResetResult };
 }
-
-export { OPERATIONAL_RESET_CONFIRM_PHRASE };

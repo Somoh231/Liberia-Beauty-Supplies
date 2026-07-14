@@ -170,7 +170,10 @@ grant execute on function public.admin_issue_operational_reset_reauth() to authe
 
 -- ---------------------------------------------------------------------------
 -- Hard reset: single transaction, FK-safe delete order
+-- Prior version (20260525120000) returned uuid; this returns jsonb — must DROP.
 -- ---------------------------------------------------------------------------
+drop function if exists public.admin_reset_sales_and_inventory(jsonb);
+
 create or replace function public.admin_reset_sales_and_inventory(p_payload jsonb)
 returns jsonb
 language plpgsql

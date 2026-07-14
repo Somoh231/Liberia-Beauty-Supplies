@@ -24,7 +24,7 @@ function errMsg(code: string): string {
     backup_confirmation_required: "Confirm that a database backup / export has been taken.",
     forbidden_owner_required: "Only the business owner can run this reset.",
     migration_required:
-      "Database migration required. Apply 20260530120000_operational_hard_reset_full_fk_audit.sql on Supabase.",
+      "Database migration required. Apply 20260531120000_operational_hard_reset_optional_table_safe.sql on Supabase.",
     preview_failed: "Could not load reset preview counts.",
     reauth_required: "Re-enter your password to authorize this reset.",
     reauth_failed: "Password verification failed.",

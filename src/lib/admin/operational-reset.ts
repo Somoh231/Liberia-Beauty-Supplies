@@ -25,6 +25,51 @@ export const OPERATIONAL_RESET_DELETE_ORDER = [
 ] as const;
 
 /**
+ * Optional legacy tables: counted/deleted only via dynamic SQL after to_regclass.
+ * Missing tables must not break preview counts or reset (count as 0 / skip delete).
+ */
+export const OPERATIONAL_RESET_OPTIONAL_LEGACY_TABLES = [
+  "stock_movements",
+  "sale_items",
+  "purchase_items",
+  "purchase_invoices",
+  "weekly_log_product_lines",
+  "weekly_log_service_lines",
+  "weekly_logs",
+] as const;
+
+export type OperationalResetOptionalLegacyTable =
+  (typeof OPERATIONAL_RESET_OPTIONAL_LEGACY_TABLES)[number];
+
+/**
+ * Mirrors SQL public.safe_table_count: absent optional relations count as 0.
+ * `presentTables` is the set of tables that exist in the target database.
+ */
+export function safeOptionalTableCount(
+  presentTables: ReadonlySet<string>,
+  table: OperationalResetOptionalLegacyTable,
+  rawCount: number,
+): number {
+  if (!presentTables.has(table)) return 0;
+  return rawCount;
+}
+
+/**
+ * Build wipe counts when some optional legacy tables are missing from the DB.
+ * Required tables keep their raw counts; optional missing tables become 0.
+ */
+export function wipeCountsWithOptionalTablesAbsent(
+  raw: OperationalResetWipeCounts,
+  presentOptionalTables: ReadonlySet<string>,
+): OperationalResetWipeCounts {
+  const next = { ...raw };
+  for (const table of OPERATIONAL_RESET_OPTIONAL_LEGACY_TABLES) {
+    next[table] = safeOptionalTableCount(presentOptionalTables, table, raw[table]);
+  }
+  return next;
+}
+
+/**
  * Legacy weekly retail product lines live in `weekly_product_sales`.
  * Preserved (not wiped): weekly_sales_reports, weekly_service_sales.
  */

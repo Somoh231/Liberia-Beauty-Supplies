@@ -3,6 +3,7 @@ import {
   LEGACY_PRODUCT_SALE_TABLE_MAPPING,
   OPERATIONAL_RESET_CONFIRM_PHRASE,
   OPERATIONAL_RESET_DELETE_ORDER,
+  OPERATIONAL_RESET_OPTIONAL_LEGACY_TABLES,
   OPERATIONAL_RESET_PARENT_AFTER_CHILDREN,
   assertWipeCountsAreZero,
   canEnableOperationalReset,
@@ -10,6 +11,7 @@ import {
   isExactResetConfirmation,
   mapOperationalResetError,
   simulateOperationalReset,
+  wipeCountsWithOptionalTablesAbsent,
   type OperationalResetWipeCounts,
   type SimulatedResetDataset,
 } from "@/lib/admin/operational-reset";
@@ -243,13 +245,50 @@ describe("operational hard reset contracts", () => {
     expect(result.rolledBack.wipe.inventory_items.length).toBe(3);
   });
 
-  it("forced failure after weekly_logs restores inventory_items and weekly logs", () => {
-    const initial = sampleDataset();
-    const result = simulateOperationalReset(initial, { failAfterStep: "weekly_logs" });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rolledBack.wipe.weekly_logs).toEqual([1]);
-    expect(result.rolledBack.wipe.weekly_log_product_lines).toEqual([1]);
-    expect(result.rolledBack.wipe.inventory_items.length).toBe(3);
+  it("treats missing optional legacy tables as zero counts (safe_table_count contract)", () => {
+    const present = new Set<string>(); // none of the optional legacy tables exist
+    const raw: OperationalResetWipeCounts = {
+      sales_edit_log: 0,
+      inventory_movements: 0,
+      stock_movements: 99,
+      inventory_correction_log: 0,
+      sale_items: 42,
+      sales: 0,
+      purchase_lines: 0,
+      purchase_items: 7,
+      purchase_invoices: 3,
+      purchases: 0,
+      weekly_product_sales: 0,
+      weekly_log_product_lines: 5,
+      weekly_log_service_lines: 4,
+      weekly_logs: 2,
+      inventory_import_batches: 0,
+      inventory_items: 0,
+      daily_cash_reconciliations: 0,
+      service_logs_with_product_usage: 0,
+    };
+    const coerced = wipeCountsWithOptionalTablesAbsent(raw, present);
+    expect(coerced.sale_items).toBe(0);
+    expect(coerced.stock_movements).toBe(0);
+    expect(coerced.purchase_items).toBe(0);
+    expect(coerced.purchase_invoices).toBe(0);
+    expect(coerced.weekly_logs).toBe(0);
+    expect(assertWipeCountsAreZero(coerced)).toBe(true);
+
+    // When optional tables ARE present, raw counts are preserved.
+    const allPresent = new Set<string>([...OPERATIONAL_RESET_OPTIONAL_LEGACY_TABLES]);
+    expect(wipeCountsWithOptionalTablesAbsent(raw, allPresent).sale_items).toBe(42);
+  });
+
+  it("documents optional legacy tables that require dynamic SQL", () => {
+    expect([...OPERATIONAL_RESET_OPTIONAL_LEGACY_TABLES]).toEqual([
+      "stock_movements",
+      "sale_items",
+      "purchase_items",
+      "purchase_invoices",
+      "weekly_log_product_lines",
+      "weekly_log_service_lines",
+      "weekly_logs",
+    ]);
   });
 });

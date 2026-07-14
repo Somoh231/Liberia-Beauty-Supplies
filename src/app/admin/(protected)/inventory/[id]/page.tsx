@@ -8,6 +8,7 @@ import { loadInventoryDetailBootstrap, toSupplierOptions } from "@/lib/admin/inv
 import { formatSalonMoney, type StockStatus } from "@/lib/admin/salon-format";
 import {
   effectiveUnitCostUsdCents,
+  inventoryNeedsSetup,
   inventoryValueUsdCents,
   ngnKoboToUsdCents,
   resolveOperationalFxFromSettings,
@@ -66,21 +67,36 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
   const supplierOptions = toSupplierOptions(suppliers);
 
   const st = item.stock_status as StockStatus | null;
+  const needsSetup = inventoryNeedsSetup(item) || item.setup_status === "needs_setup";
+  const isAsset = item.item_type === "asset";
   const badgeCls =
-    st === "in_stock"
-      ? "admin-badge-active"
-      : st === "low_stock"
-        ? "admin-badge-low"
-        : st === "out_of_stock"
-          ? "admin-badge-out"
-          : "text-white/50";
-  const badgeLabel =
-    st === "in_stock" ? "In stock" : st === "low_stock" ? "Low stock" : st === "out_of_stock" ? "Out of stock" : "—";
+    isAsset
+      ? "text-sky-100/90 ring-1 ring-sky-400/35"
+      : needsSetup
+        ? "text-amber-100/90 ring-1 ring-amber-400/35"
+        : st === "in_stock"
+          ? "admin-badge-active"
+          : st === "low_stock"
+            ? "admin-badge-low"
+            : st === "out_of_stock"
+              ? "admin-badge-out"
+              : "text-white/50";
+  const badgeLabel = isAsset
+    ? "Asset"
+    : needsSetup
+      ? "Needs setup"
+      : st === "in_stock"
+        ? "In stock"
+        : st === "low_stock"
+          ? "Low stock"
+          : st === "out_of_stock"
+            ? "Out of stock"
+            : "—";
 
-  const usdUnit = effectiveUnitCostUsdCents(item);
-  const invVal = inventoryValueUsdCents(item);
-  const grossUnit = unitGrossProfitUsdCents(item);
-  const marginPct = unitGrossMarginPct(item);
+  const usdUnit = effectiveUnitCostUsdCents(item, { operationalFx: opRates });
+  const invVal = inventoryValueUsdCents(item, { operationalFx: opRates });
+  const grossUnit = unitGrossProfitUsdCents(item, { operationalFx: opRates });
+  const marginPct = unitGrossMarginPct(item, { operationalFx: opRates });
   const fxNgn = item.fx_ngn_per_usd != null && item.fx_ngn_per_usd > 0 ? Number(item.fx_ngn_per_usd) : opRates.ngnPerUsd;
   const landedAddonUsdCents = item.landed_usd_cents_per_unit ?? 0;
   let supplierUsdOnlyCents = 0;
@@ -103,7 +119,14 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
           <p className="text-xs font-mono text-white/50">{item.product_code}</p>
           <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">{item.product_name}</h1>
         </div>
-        <span className={cn("admin-badge w-fit uppercase tracking-wide", badgeCls)}>{badgeLabel}</span>
+        <div className="flex flex-wrap gap-2">
+          {needsSetup && isAsset ? (
+            <span className="admin-badge w-fit uppercase tracking-wide text-amber-100/90 ring-1 ring-amber-400/35">
+              Needs setup
+            </span>
+          ) : null}
+          <span className={cn("admin-badge w-fit uppercase tracking-wide", badgeCls)}>{badgeLabel}</span>
+        </div>
       </div>
 
       <section className="admin-card space-y-4 p-6 text-sm">

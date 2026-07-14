@@ -75,7 +75,7 @@ export type InventoryImportPreviewReport = {
   };
 };
 
-/** Included worksheets for catalog / financial import (normalized names). */
+/** Included worksheets for catalog / financial import (normalized / trimmed names). */
 export const EXPECTED_IMPORT_CATEGORIES = [
   "Human Hair",
   "List of Hair Products",
@@ -89,3 +89,18 @@ export const EXPECTED_IMPORT_CATEGORIES = [
 
 /** Explicitly excluded worksheets — never imported (including all rows inside). */
 export const EXCLUDED_IMPORT_CATEGORIES = ["Dummy Heads"] as const;
+
+/** Exact catalog-only product counts from Final_Master_Inventory_Workbook.xlsx. */
+export const EXPECTED_CATALOG_PRODUCT_COUNTS: Record<(typeof EXPECTED_IMPORT_CATEGORIES)[number], number> = {
+  "Human Hair": 21,
+  "List of Hair Products": 41,
+  Extensions: 17,
+  "Ponytail Hair": 3,
+  "Makeup Products": 36,
+  "Lash Extension": 22,
+  "Hair & Salon Equipment": 14,
+  Microblading: 23,
+};
+
+export const EXPECTED_CATALOG_CATEGORY_COUNT = EXPECTED_IMPORT_CATEGORIES.length;
+export const EXPECTED_CATALOG_PRODUCT_TOTAL = 177;

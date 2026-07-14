@@ -40,6 +40,14 @@ describe("canonical FX contract", () => {
     expect(convertLrdCentsToUsdCents(1900 * 100, lrd)).toBe(1000);
   });
 
+  it("LRD has no 100× error (major-per-major FX on cent amounts)", () => {
+    // $1.00 = 100 USD cents → at 190 LRD/USD → 19_000 LRD cents (= LD 190.00), not 1_900_000
+    expect(convertUsdCentsToLrdCents(100, 190)).toBe(19_000);
+    expect(convertLrdCentsToUsdCents(19_000, 190)).toBe(100);
+    // Wrong 100× would produce 1_900_000 LRD cents for $1
+    expect(convertUsdCentsToLrdCents(100, 190)).not.toBe(1_900_000);
+  });
+
   it("handles zero values", () => {
     expect(ngnKoboToUsdCents(0, ngn)).toBe(0);
     expect(convertUsdCentsToLrdCents(0, lrd)).toBe(0);
@@ -55,12 +63,18 @@ describe("canonical FX contract", () => {
     expect(usdCentsToNgnKobo(1000, 0)).toBe(0);
   });
 
-  it("settings override wins over baseline", () => {
+  it("settings rates are used for NGN and LRD conversion (not baseline when present)", () => {
     const rates = resolveOperationalFxFromSettings({ ngn_per_usd: 1400, lrd_per_usd: 200 });
     expect(rates.ngnPerUsd).toBe(1400);
     expect(rates.lrdPerUsd).toBe(200);
     expect(ngnKoboToUsdCents(1400 * 100, rates.ngnPerUsd)).toBe(100);
     expect(convertUsdCentsToLrdCents(1000, rates.lrdPerUsd)).toBe(2000 * 100);
+    expect(lineRevenueUsdEquivCents(1400 * 100, 1, "NGN", rates)).toBe(100);
+    expect(lineRevenueUsdEquivCents(2000 * 100, 1, "LRD", rates)).toBe(1000);
+    // Prove baseline would differ — must not silently win when settings passed
+    expect(lineRevenueUsdEquivCents(1400 * 100, 1, "NGN", rates)).not.toBe(
+      ngnKoboToUsdCents(1400 * 100, DEFAULT_OPERATIONAL_NGN_PER_USD),
+    );
   });
 
   it("missing settings fall back to official baseline", () => {
@@ -70,6 +84,19 @@ describe("canonical FX contract", () => {
     const invalid = resolveOperationalFxFromSettings({ ngn_per_usd: 0, lrd_per_usd: -5 });
     expect(invalid.ngnPerUsd).toBe(1385);
     expect(invalid.lrdPerUsd).toBe(190);
+  });
+
+  it("WAC cost basis is USD cents (sale GP uses WAC USD, not native LRD)", () => {
+    const preview = saleLineFinancialPreview({
+      qty: 2,
+      unitPriceCents: 1900 * 100, // LD 1,900.00
+      currency: "LRD",
+      wacUsdCentsPerUnit: 500, // $5.00 WAC USD canonical
+      fx: { ngnPerUsd: 1385, lrdPerUsd: 190 },
+    });
+    // Revenue: LD 3800 → $20.00 = 2000 cents; cost 2×500=1000; GP=1000
+    expect(preview.revenueUsdCents).toBe(2000);
+    expect(preview.grossProfitUsdCents).toBe(1000);
   });
 
   it("large-value rounding stays stable", () => {
@@ -98,7 +125,7 @@ describe("sale line revenue / GP", () => {
 });
 
 describe("inventoryNeedsSetup", () => {
-  it("flags clean catalog seed rows", () => {
+  it("flags incomplete catalog seed rows", () => {
     expect(
       inventoryNeedsSetup({
         quantity_on_hand: 0,
@@ -109,10 +136,19 @@ describe("inventoryNeedsSetup", () => {
         supplier_id: null,
       }),
     ).toBe(true);
+    expect(inventoryNeedsSetup({ setup_status: "needs_setup" })).toBe(true);
   });
 
-  it("clears when retail or qty present", () => {
-    expect(inventoryNeedsSetup({ quantity_on_hand: 2, avg_unit_cost_cents: 0 })).toBe(false);
-    expect(inventoryNeedsSetup({ quantity_on_hand: 0, sell_price_usd_cents: 1000 })).toBe(false);
+  it("clears when retail setup is complete or status is ready", () => {
+    expect(
+      inventoryNeedsSetup({
+        quantity_on_hand: 2,
+        supplier_id: "s1",
+        avg_unit_cost_cents: 100,
+        sell_price_usd_cents: 1000,
+      }),
+    ).toBe(false);
+    expect(inventoryNeedsSetup({ setup_status: "ready" })).toBe(false);
+    expect(inventoryNeedsSetup({ item_type: "asset" })).toBe(false);
   });
 });

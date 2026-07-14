@@ -113,11 +113,10 @@ function parseSheetRows(
       continue;
     }
 
-    // Skip SN-only or label rows without product name
-    const nameIdx = profile === "carton" ? 0 : profile === "hair_products_mixed" ? 1 : 1;
-    const productName = cells[nameIdx]?.trim() ?? "";
+    // Skip SN-only or label rows without product name (catalog uses col B exclusively)
+    const productName = cells[1]?.trim() ?? "";
     if (!productName) continue;
-    if (/^grand\s*total/i.test(productName)) continue;
+    if (/TOTAL/i.test(productName)) continue;
     if (/^\d+(\.\d+)?$/.test(productName)) continue;
 
     if (mode === "catalog") {
@@ -149,6 +148,10 @@ function parseSheetRows(
 /**
  * Parse workbook bytes into preview report. NO database writes.
  * Default mode is `catalog` (names + categories only).
+ *
+ * Sheet names and header cells are trimmed before matching. The Dummy Heads
+ * sheet is excluded even when its workbook name has trailing spaces.
+ * Missing expected sheets or unexpected non-excluded sheets throw loudly.
  */
 export function parseInventoryWorkbookBuffer(
   buffer: ArrayBuffer,
@@ -179,20 +182,31 @@ export function parseInventoryWorkbookBuffer(
     if (!normalizedInFile.has(expected)) missingExpectedSheets.push(expected);
   }
 
+  if (missingExpectedSheets.length > 0) {
+    throw new Error(
+      `Missing expected workbook sheet(s) after trim: ${missingExpectedSheets.join(", ")}. ` +
+        `Required sheets: ${EXPECTED_IMPORT_CATEGORIES.join(", ")}.`,
+    );
+  }
+
+  if (unknownSheets.length > 0) {
+    throw new Error(
+      `Unexpected workbook sheet(s) (after trim): ${unknownSheets
+        .map((s) => JSON.stringify(s))
+        .join(", ")}. ` +
+        `Only the 8 expected categories plus excluded sheet(s) [${EXCLUDED_IMPORT_CATEGORIES.join(", ")}] are allowed.`,
+    );
+  }
+
   for (const expected of EXPECTED_IMPORT_CATEGORIES) {
     const rawName = normalizedInFile.get(expected);
     if (!rawName) continue;
     const ws = wb.Sheets[rawName];
-    if (!ws) continue;
+    if (!ws) {
+      throw new Error(`Expected sheet ${JSON.stringify(expected)} resolved to ${JSON.stringify(rawName)} but worksheet data is missing.`);
+    }
     const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, raw: true }) as unknown[][];
     allRows.push(...parseSheetRows(expected, matrix, fx, mode));
-  }
-
-  // Never parse Dummy Heads (or any excluded sheet), even if present.
-  for (const excluded of EXCLUDED_IMPORT_CATEGORIES) {
-    if (normalizedInFile.has(excluded) && !excludedSheets.length) {
-      excludedSheets.push(normalizedInFile.get(excluded)!);
-    }
   }
 
   const duplicateNameWarnings = applyDuplicateWarnings(allRows);

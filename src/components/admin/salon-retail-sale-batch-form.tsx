@@ -59,10 +59,13 @@ export function SalonRetailSaleBatchForm({
   items,
   staff,
   operationalFxSummaryLine,
+  operationalFx,
 }: {
   items: InventoryItemRow[];
   staff: boolean;
   operationalFxSummaryLine?: string;
+  /** Settings-driven rates for LRD↔USD conversion / margin preview. */
+  operationalFx?: { ngnPerUsd: number; lrdPerUsd: number };
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -150,15 +153,21 @@ export function SalonRetailSaleBatchForm({
       const qtyN = Number(String(row.qty).replace(/,/g, ""));
       if (uc == null || !Number.isFinite(qtyN) || qtyN <= 0) continue;
       const lineCurrency: "USD" | "LRD" = row.currency === "LRD" ? "LRD" : "USD";
-      const wac = effectiveUnitCostUsdCents(sel);
-      const p = saleLineFinancialPreview({ qty: qtyN, unitPriceCents: uc, currency: lineCurrency, wacUsdCentsPerUnit: wac });
+      const wac = effectiveUnitCostUsdCents(sel, { operationalFx });
+      const p = saleLineFinancialPreview({
+        qty: qtyN,
+        unitPriceCents: uc,
+        currency: lineCurrency,
+        wacUsdCentsPerUnit: wac,
+        fx: operationalFx,
+      });
       revenueUsdCents += p.revenueUsdCents;
       grossProfitUsdCents += p.grossProfitUsdCents;
       lines += 1;
     }
     const marginPct = revenueUsdCents > 0 ? (grossProfitUsdCents / revenueUsdCents) * 100 : null;
     return { revenueUsdCents, grossProfitUsdCents, marginPct, lines };
-  }, [rows, itemById]);
+  }, [rows, itemById, operationalFx]);
 
   return (
     <form
@@ -180,7 +189,8 @@ export function SalonRetailSaleBatchForm({
               qty: qtyN,
               unitPriceCents: uc,
               currency: lineCurrency,
-              wacUsdCentsPerUnit: effectiveUnitCostUsdCents(sel),
+              wacUsdCentsPerUnit: effectiveUnitCostUsdCents(sel, { operationalFx }),
+              fx: operationalFx,
             });
             if (prev.grossProfitUsdCents < 0) {
               loss = true;
@@ -233,7 +243,7 @@ export function SalonRetailSaleBatchForm({
       <div className="space-y-4">
         {rows.map((row, idx) => {
           const sel = itemById[row.inventoryItemId];
-          const wac = sel ? effectiveUnitCostUsdCents(sel) : 0;
+          const wac = sel ? effectiveUnitCostUsdCents(sel, { operationalFx }) : 0;
           const uc = parseMoneyToCents(row.unitPrice);
           const qtyN = Number(String(row.qty).replace(/,/g, ""));
           const lineCurrency: "USD" | "LRD" = row.currency === "LRD" ? "LRD" : "USD";
@@ -244,12 +254,15 @@ export function SalonRetailSaleBatchForm({
                   unitPriceCents: uc,
                   currency: lineCurrency,
                   wacUsdCentsPerUnit: wac,
+                  fx: operationalFx,
                 })
               : null;
-          const dual = row.unitPrice ? complementaryRetailLabel(row.unitPrice, lineCurrency) : null;
-          const unitMargin = sel ? unitGrossMarginPct(sel) : null;
+          const dual = row.unitPrice ? complementaryRetailLabel(row.unitPrice, lineCurrency, operationalFx) : null;
+          const unitMargin = sel ? unitGrossMarginPct(sel, { operationalFx }) : null;
           const liveUnitMargin =
-            sel && uc != null && uc > 0 ? unitMarginPctAtRetailPriceMinor(uc, lineCurrency, wac) : null;
+            sel && uc != null && uc > 0
+              ? unitMarginPctAtRetailPriceMinor(uc, lineCurrency, wac, operationalFx?.lrdPerUsd)
+              : null;
           const locked = priceLocked(row, sel);
 
           return (
@@ -347,7 +360,7 @@ export function SalonRetailSaleBatchForm({
                       if (raw !== "USD" && raw !== "LRD") return;
                       const cur: "USD" | "LRD" = row.currency === "LRD" ? "LRD" : "USD";
                       const to: "USD" | "LRD" = raw === "LRD" ? "LRD" : "USD";
-                      const converted = convertRetailUnitMajorOnCurrencySwitch(row.unitPrice, cur, to);
+                      const converted = convertRetailUnitMajorOnCurrencySwitch(row.unitPrice, cur, to, operationalFx);
                       setRows((rs) => {
                         const n = [...rs];
                         n[idx] = { ...n[idx], currency: to, unitPrice: converted };

@@ -3,6 +3,7 @@ import type {
   InventoryImportPreviewReport,
   ParsedInventoryImportRow,
 } from "@/lib/admin/inventory-import/types";
+import { resolveCatalogItemType } from "@/lib/admin/inventory-sellability";
 
 export type InventoryImportRowOverride = {
   skipped?: boolean;
@@ -58,7 +59,8 @@ export type ImportCommitRowPayload = {
   category: string;
   quantity: number;
   unit: string;
-  retail_ngn_cents: number;
+  /** Catalog seed uses null (no spreadsheet price). Financial import uses cents. */
+  retail_ngn_cents: number | null;
   sell_usd_cents: number | null;
   sell_lrd_cents: number | null;
   notes: string | null;
@@ -67,6 +69,14 @@ export type ImportCommitRowPayload = {
   catalog_only?: boolean;
   source_sheet?: string;
   source_row?: number;
+  /**
+   * Catalog seed always sends needs_setup; commit_inventory_catalog_seed persists it.
+   */
+  setup_status?: "needs_setup";
+  /**
+   * retail by default; asset names force asset (persisted by catalog seed RPC).
+   */
+  item_type?: "retail" | "asset";
 };
 
 export type UnresolvedRowSnapshot = {
@@ -104,13 +114,15 @@ function toCatalogImportPayload(row: ParsedInventoryImportRow): ImportCommitRowP
   const name = row.productName.trim();
   if (name.length < 2) return null;
   if (row.validationStatus !== "ok" && row.validationStatus !== "warning") return null;
+  const itemType = resolveCatalogItemType(name);
+  // Never carry spreadsheet qty/cost/price/rate/total into the seed payload.
   return {
     preview_id: row.id,
     product_name: name,
-    category: row.category,
+    category: row.category.trim(),
     quantity: 0,
     unit: "each",
-    retail_ngn_cents: 0,
+    retail_ngn_cents: null,
     sell_usd_cents: null,
     sell_lrd_cents: null,
     notes: noteFromRow(row),
@@ -118,6 +130,8 @@ function toCatalogImportPayload(row: ParsedInventoryImportRow): ImportCommitRowP
     catalog_only: true,
     source_sheet: row.sourceSheet,
     source_row: row.sourceRow,
+    setup_status: "needs_setup",
+    item_type: itemType,
   };
 }
 
@@ -170,6 +184,7 @@ export function buildImportCommitPlan(
   let errorCount = 0;
   let warningCount = 0;
   const categoryTotals: Record<string, { imported: number; unresolved: number; skipped: number }> = {};
+  const seenUnique = new Set<string>();
 
   const bumpCat = (cat: string, field: "imported" | "unresolved" | "skipped") => {
     if (!categoryTotals[cat]) categoryTotals[cat] = { imported: 0, unresolved: 0, skipped: 0 };
@@ -188,6 +203,24 @@ export function buildImportCommitPlan(
         bumpCat(row.category, "unresolved");
         continue;
       }
+
+      // Enforce unique category + lower(name). On conflict, report and skip (no duplicate).
+      const uniqueKey = `${payload.category}::${payload.product_name.toLowerCase()}`;
+      if (seenUnique.has(uniqueKey)) {
+        skippedCount += 1;
+        unresolvedRows.push({
+          ...toUnresolvedSnapshot(row),
+          validation_status: "duplicate_skipped",
+          validation_messages: [
+            ...row.validationMessages,
+            `Skipped duplicate category+name: ${payload.category} / ${payload.product_name}`,
+          ],
+        });
+        bumpCat(row.category, "skipped");
+        continue;
+      }
+      seenUnique.add(uniqueKey);
+
       importRows.push(payload);
       if (row.validationStatus === "warning") warningCount += 1;
       bumpCat(row.category, "imported");

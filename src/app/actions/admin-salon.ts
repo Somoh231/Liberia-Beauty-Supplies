@@ -12,6 +12,7 @@ import {
   type InventoryMovementType,
 } from "@/lib/admin/inventory-admin-correction";
 import { inventoryCostingFromFormMajors, unitGrossProfitUsdCents } from "@/lib/admin/pricing-engine";
+import { mapInventorySaleGuardError } from "@/lib/admin/inventory-sellability";
 import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -368,7 +369,7 @@ export async function createProductSaleAction(input: {
   const qty = parseQty(input.qty);
   if (qty == null || qty <= 0) return { ok: false, error: "invalid_qty" };
   const unitPrice = parseMoneyToCents(input.unitPrice);
-  if (unitPrice == null) return { ok: false, error: "invalid_price" };
+  if (unitPrice == null || unitPrice <= 0) return { ok: false, error: "product_missing_retail_price" };
   const cur = normalizeCurrency(input.currency);
 
   const supabase = await createSupabaseServerClient();
@@ -378,6 +379,8 @@ export async function createProductSaleAction(input: {
 
   const item = await fetchInventoryItem(supabase, input.inventoryItemId);
   if (!item) return { ok: false, error: "not_found" };
+  if (item.item_type === "asset") return { ok: false, error: "product_not_sellable" };
+  if (item.setup_status === "needs_setup") return { ok: false, error: "product_needs_setup" };
 
   const soldAt =
     input.saleDate && /^\d{4}-\d{2}-\d{2}$/.test(input.saleDate.trim())
@@ -399,7 +402,9 @@ export async function createProductSaleAction(input: {
   });
 
   if (error) {
-    if (error.message.includes("insufficient_stock") || error.code === "P0001") {
+    const guard = mapInventorySaleGuardError(error.message ?? "", error.code);
+    if (guard) return { ok: false, error: guard };
+    if ((error.message ?? "").toLowerCase().includes("insufficient_stock")) {
       return { ok: false, error: "insufficient_stock" };
     }
     return { ok: false, error: error.message };
@@ -433,7 +438,7 @@ export async function editRetailSaleAction(input: {
   if (qty == null || qty <= 0) return { ok: false, error: "invalid_qty" };
 
   const unitPrice = parseMoneyToCents(input.unitPrice);
-  if (unitPrice == null) return { ok: false, error: "invalid_price" };
+  if (unitPrice == null || unitPrice <= 0) return { ok: false, error: "product_missing_retail_price" };
 
   const d = input.saleDate?.trim();
   if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, error: "invalid_date" };
@@ -441,6 +446,11 @@ export async function editRetailSaleAction(input: {
   const cur = normalizeCurrency(input.currency);
 
   const supabase = await createSupabaseServerClient();
+  const replacement = await fetchInventoryItem(supabase, input.inventoryItemId);
+  if (!replacement) return { ok: false, error: "product_not_found" };
+  if (replacement.item_type === "asset") return { ok: false, error: "product_not_sellable" };
+  if (replacement.setup_status === "needs_setup") return { ok: false, error: "product_needs_setup" };
+
   const { error } = await supabase.rpc("admin_edit_retail_sale", {
     p_payload: {
       sale_id: input.saleId,
@@ -473,6 +483,9 @@ export async function editRetailSaleAction(input: {
     }
     if (msg.includes("sale_not_found") || msg.includes("invalid_sale_id")) return { ok: false, error: "sale_not_found" };
     if (msg.includes("product_not_found") || msg.includes("not_found")) return { ok: false, error: "product_not_found" };
+    if (msg.includes("product_needs_setup")) return { ok: false, error: "product_needs_setup" };
+    if (msg.includes("product_not_sellable")) return { ok: false, error: "product_not_sellable" };
+    if (msg.includes("product_missing_retail_price")) return { ok: false, error: "product_missing_retail_price" };
     if (msg.includes("insufficient_stock")) return { ok: false, error: "insufficient_stock" };
     if (msg.includes("invalid_currency")) return { ok: false, error: "invalid_currency" };
     if (msg.includes("invalid_price")) return { ok: false, error: "invalid_price" };

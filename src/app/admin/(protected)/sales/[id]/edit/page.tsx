@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { SalonSaleEditForm } from "@/components/admin/salon-sale-edit-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchInventoryItem, fetchInventoryProducts, fetchRetailSaleById } from "@/lib/admin/salon-queries";
+import { fetchInventoryItem, fetchSellableInventoryProducts, fetchRetailSaleById } from "@/lib/admin/salon-queries";
 import { requireAdminContext } from "@/lib/auth/admin-context";
 
 export const dynamic = "force-dynamic";
@@ -21,19 +21,18 @@ export default async function AdminSaleEditPage({ params }: Props) {
 
   const { id } = await params;
   const supabase = await createSupabaseServerClient();
-  const [sale, items] = await Promise.all([
+  const [sale, sellable] = await Promise.all([
     fetchRetailSaleById(supabase, id),
-    fetchInventoryProducts(supabase, {}),
+    fetchSellableInventoryProducts(supabase),
   ]);
 
   if (!sale) notFound();
 
-  const activeItems = items.filter((i) => i.active);
   const saleLineItem = await fetchInventoryItem(supabase, sale.inventory_item_id);
   const pickerItems =
-    saleLineItem && !activeItems.some((i) => i.id === saleLineItem.id)
-      ? [saleLineItem, ...activeItems]
-      : activeItems;
+    saleLineItem && !sellable.some((i) => i.id === saleLineItem.id)
+      ? [saleLineItem, ...sellable]
+      : sellable;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 pb-10">

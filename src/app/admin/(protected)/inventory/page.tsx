@@ -10,7 +10,7 @@ import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context"
 export const metadata: Metadata = { title: "Inventory" };
 export const dynamic = "force-dynamic";
 
-type Search = { q?: string; status?: string; page?: string };
+type Search = { q?: string; status?: string; page?: string; focus?: string };
 
 function statusBadge(status: StockStatus | null) {
   if (status === "in_stock") return <span className="admin-badge admin-badge-active uppercase tracking-wide">In stock</span>;
@@ -35,10 +35,13 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
   const page = Math.max(1, parseInt(typeof sp.page === "string" ? sp.page : "1", 10) || 1);
   const statusFilter: StockStatus | "all" =
     st === "in_stock" || st === "low_stock" || st === "out_of_stock" ? st : "all";
+  const focusRaw = typeof sp.focus === "string" ? sp.focus : "all";
+  const focusFilter: "needs_setup" | "asset" | "ready_retail" | "all" =
+    focusRaw === "needs_setup" || focusRaw === "asset" || focusRaw === "ready_retail" ? focusRaw : "all";
 
   const supabase = await createSupabaseServerClient();
   const [{ rows: items, total, page: curPage, pageSize }, summary, settings] = await Promise.all([
-    fetchInventoryProductsPage(supabase, { q, status: statusFilter, page, pageSize: 15 }),
+    fetchInventoryProductsPage(supabase, { q, status: statusFilter, focus: focusFilter, page, pageSize: 15 }),
     fetchInventoryStatusSummary(supabase),
     fetchOperationalSettings(supabase),
   ]);
@@ -57,8 +60,31 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (status !== "all") params.set("status", status);
+    if (focusFilter !== "all") params.set("focus", focusFilter);
     const qs = params.toString();
     const active = statusFilter === status;
+    return (
+      <Link
+        href={qs ? `/admin/inventory?${qs}` : "/admin/inventory"}
+        className={cn(
+          "rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] ring-1 transition",
+          active
+            ? "bg-white/10 text-white ring-white/20"
+            : "text-white/50 ring-transparent hover:bg-white/[0.06] hover:text-white/80",
+        )}
+      >
+        {label}
+      </Link>
+    );
+  };
+
+  const focusLink = (focus: "all" | "needs_setup" | "asset" | "ready_retail", label: string) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (focus !== "all") params.set("focus", focus);
+    const qs = params.toString();
+    const active = focusFilter === focus;
     return (
       <Link
         href={qs ? `/admin/inventory?${qs}` : "/admin/inventory"}
@@ -78,6 +104,7 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (statusFilter !== "all") params.set("status", statusFilter);
+    if (focusFilter !== "all") params.set("focus", focusFilter);
     if (p > 1) params.set("page", String(p));
     const qs = params.toString();
     return qs ? `/admin/inventory?${qs}` : "/admin/inventory";
@@ -138,6 +165,7 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <form action="/admin/inventory" method="get" className="flex w-full max-w-md flex-col gap-2 sm:flex-row sm:items-center">
           {statusFilter !== "all" ? <input type="hidden" name="status" value={statusFilter} /> : null}
+          {focusFilter !== "all" ? <input type="hidden" name="focus" value={focusFilter} /> : null}
           <input
             name="q"
             defaultValue={q}
@@ -156,6 +184,11 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
           {filterLink("in_stock", "In stock")}
           {filterLink("low_stock", "Low")}
           {filterLink("out_of_stock", "Out")}
+          <span className="mx-1 text-white/20">|</span>
+          {focusLink("all", "Any setup")}
+          {focusLink("needs_setup", "Needs setup")}
+          {focusLink("asset", "Assets")}
+          {focusLink("ready_retail", "Ready retail")}
         </div>
       </div>
 
@@ -180,10 +213,11 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
           </thead>
           <tbody>
             {items.map((row) => {
-              const usdUnit = effectiveUnitCostUsdCents(row);
-              const gross = unitGrossProfitUsdCents(row);
-              const margin = unitGrossMarginPct(row);
-              const needsSetup = inventoryNeedsSetup(row);
+              const usdUnit = effectiveUnitCostUsdCents(row, { operationalFx: opFx });
+              const gross = unitGrossProfitUsdCents(row, { operationalFx: opFx });
+              const margin = unitGrossMarginPct(row, { operationalFx: opFx });
+              const needsSetup = inventoryNeedsSetup(row) || row.setup_status === "needs_setup";
+              const isAsset = row.item_type === "asset";
               const supplierCell =
                 row.cost_currency === "NGN"
                   ? formatSalonMoney(row.avg_unit_cost_cents, "NGN")
@@ -199,10 +233,15 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
                         Needs setup
                       </span>
                     ) : null}
-                    {row.stock_status === "low_stock" ? (
+                    {isAsset ? (
+                      <span className="admin-badge ml-1.5 uppercase tracking-wide text-sky-100/90 ring-1 ring-sky-400/35">
+                        Asset
+                      </span>
+                    ) : null}
+                    {row.stock_status === "low_stock" && !isAsset ? (
                       <span className="admin-badge admin-badge-low ml-1.5 uppercase tracking-wide">Low</span>
                     ) : null}
-                    {row.stock_status === "out_of_stock" ? (
+                    {row.stock_status === "out_of_stock" && !isAsset ? (
                       <span className="admin-badge admin-badge-out ml-1.5 uppercase tracking-wide">Out</span>
                     ) : null}
                     <span className="ml-2 font-mono text-[10px] text-white/35">{row.product_code}</span>
@@ -210,7 +249,11 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
                     {row.category ? <span className="mt-0.5 block text-[10px] text-white/40">{row.category}</span> : null}
                   </td>
                   <td className="px-3 py-3">
-                    {needsSetup ? (
+                    {isAsset ? (
+                      <span className="admin-badge uppercase tracking-wide text-sky-100/90 ring-1 ring-sky-400/35">
+                        Asset
+                      </span>
+                    ) : needsSetup ? (
                       <span className="admin-badge uppercase tracking-wide text-amber-100/90 ring-1 ring-amber-400/35">
                         Needs setup
                       </span>

@@ -8,6 +8,7 @@ import {
   fetchTodayRevenueSnapshot,
   fetchSaleLogAnalytics,
   fetchDashboardTrustSignals,
+  fetchInventorySetupProgress,
 } from "@/lib/admin/salon-queries";
 import { formatSalonMoney } from "@/lib/admin/salon-format";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
@@ -52,10 +53,11 @@ export default async function AdminDashboardPage() {
   let topServices: Awaited<ReturnType<typeof fetchSaleLogAnalytics>>["topServices"] = [];
   let saleLogAnalytics: Awaited<ReturnType<typeof fetchSaleLogAnalytics>> | null = null;
   let trust: Awaited<ReturnType<typeof fetchDashboardTrustSignals>> | null = null;
+  let setupProgress: Awaited<ReturnType<typeof fetchInventorySetupProgress>> | null = null;
 
   try {
     const supabase = await createSupabaseServerClient();
-    const [r, act, m, ls, t, analytics, tr] = await Promise.all([
+    const [r, act, m, ls, t, analytics, tr, setup] = await Promise.all([
       fetchDashboardRollup(supabase),
       fetchRecentActivity(supabase, 10),
       fetchTopMarginProducts(supabase, 5),
@@ -63,6 +65,7 @@ export default async function AdminDashboardPage() {
       fetchTodayRevenueSnapshot(supabase),
       fetchSaleLogAnalytics(supabase),
       fetchDashboardTrustSignals(supabase),
+      fetchInventorySetupProgress(supabase),
     ]);
     rollup = r;
     activity = act;
@@ -73,6 +76,7 @@ export default async function AdminDashboardPage() {
     topProducts = analytics.topProducts.slice(0, 5);
     topServices = analytics.topServices.slice(0, 5);
     trust = tr;
+    setupProgress = setup;
   } catch (e) {
     err = e instanceof Error ? e.message : "Could not load dashboard.";
   }
@@ -139,6 +143,26 @@ export default async function AdminDashboardPage() {
                   ? "Variance today"
                   : "Pending reconciliation"}
             </li>
+            {setupProgress ? (
+              <li
+                className={cn(
+                  "rounded-full border px-2.5 py-1",
+                  setupProgress.needsSetupCount > 0
+                    ? "border-amber-500/35 bg-amber-500/[0.07] text-amber-50/90"
+                    : "border-white/10 bg-black/20",
+                )}
+              >
+                Catalog setup:{" "}
+                <span className="text-white/85">
+                  {setupProgress.needsSetupCount} need setup
+                </span>
+                <span className="text-white/45">
+                  {" "}
+                  · {setupProgress.totalProducts} products
+                  {setupProgress.assetCount > 0 ? ` · ${setupProgress.assetCount} assets` : ""}
+                </span>
+              </li>
+            ) : null}
             <li className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1">
               Low stock SKUs: <span className="text-white/85">{trust.lowStockCount}</span>
             </li>

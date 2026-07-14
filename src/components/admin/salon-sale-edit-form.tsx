@@ -25,6 +25,9 @@ function errMsg(code: string): string {
       "Sale edit requires migration 20260525120000_operational_clean_restart.sql (or 20260523120000) on Supabase.",
     sale_not_found: "Sale not found.",
     product_not_found: "Product not found or archived replacement is not allowed.",
+    product_needs_setup: "That product still needs setup and cannot be sold yet.",
+    product_not_sellable: "That product is an asset and cannot be sold.",
+    product_missing_retail_price: "Sale price must be greater than zero.",
     not_found: "Sale or product not found.",
     transaction_failed: "Sale edit failed and was rolled back. Try again or contact support.",
   };

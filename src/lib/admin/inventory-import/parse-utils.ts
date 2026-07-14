@@ -35,35 +35,32 @@ export function parseQuantityCell(v: unknown): { qty: number | null; unit: strin
   return { qty, unit };
 }
 
-const SUBTOTAL_PATTERNS = [
-  /^grand\s*total/i,
-  /total\s*:?\s*$/i,
-  /^\s*total\s*$/i,
-  /hair cream total/i,
-  /pedicure\s*&\s*manicure total/i,
-  /microblading total/i,
-  /industrial machine total/i,
-];
+/** Product / label cell for catalog sheets is column B; fall back to A for single-column headers. */
+export function productNameCell(cells: string[]): string {
+  return (cells[1] ?? cells[0] ?? "").trim();
+}
 
 export function isSubtotalOrTotalRow(cells: string[]): boolean {
-  const joined = cells.map((c) => c.trim()).filter(Boolean).join(" ").toLowerCase();
-  if (!joined) return false;
-  if (/grand\s*total/.test(joined)) return true;
-  const nameCol = (cells[1] ?? cells[0] ?? "").trim();
-  for (const pat of SUBTOTAL_PATTERNS) {
-    if (pat.test(nameCol)) return true;
-  }
-  // Hair products: GRAND TOTAL in col E with empty name
-  if (/grand\s*total/.test((cells[4] ?? "").trim())) return true;
+  const nameCol = productNameCell(cells);
+  if (nameCol && /TOTAL/i.test(nameCol)) return true;
+  // Hair products: GRAND TOTAL sometimes sits in a later financial column with empty name
+  const joined = cells.map((c) => c.trim()).filter(Boolean).join(" ");
+  if (/grand\s*total/i.test(joined) && !cells[1]?.trim()) return true;
   return false;
 }
 
 export function isHeaderRow(cells: string[]): boolean {
+  const a = (cells[0] ?? "").trim();
+  const b = (cells[1] ?? "").trim();
+  // Repeated header rows restart a table block (multi-table sheets).
+  if (/^s\/?n$/i.test(a) || /^s\/?n$/i.test(b)) return true;
+  if (/^item\s*name$/i.test(a) || /^item\s*name$/i.test(b)) return true;
+
   const joined = cells.map((c) => c.toLowerCase()).join(" ");
   if (joined.includes("s/n") && (joined.includes("quantity") || joined.includes("retail"))) return true;
-  if (cells[0]?.toLowerCase() === "list" && joined.includes("hair products")) return true;
+  if (a.toLowerCase() === "list" && joined.includes("hair products")) return true;
   if (joined.includes("item name") && joined.includes("retail")) return true;
-  if (cells[0]?.toLowerCase() === "item name" && joined.includes("carton")) return true;
+  if (a.toLowerCase() === "item name" && joined.includes("carton")) return true;
   return false;
 }
 

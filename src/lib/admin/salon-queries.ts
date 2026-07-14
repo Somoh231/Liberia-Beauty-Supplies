@@ -6,7 +6,7 @@ import {
   logAdminQueryResult,
   logAdminQueryStart,
 } from "@/lib/admin/admin-query-debug";
-import { effectiveUnitCostUsdCents, inventoryValueUsdCents, lineRevenueUsdEquivCents, unitGrossMarginPct } from "@/lib/admin/pricing-engine";
+import { effectiveUnitCostUsdCents, inventoryValueUsdCents, lineRevenueUsdEquivCents, unitGrossMarginPct, resolveOperationalFxFromSettings } from "@/lib/admin/pricing-engine";
 
 const SUPPLIER_SELECT_FULL =
   "id,name,contact_name,email,phone,country_origin,product_category,active";
@@ -37,7 +37,7 @@ async function querySuppliersTable(
 }
 
 const INV_SELECT =
-  "id,product_code,product_name,name,quantity_on_hand,reorder_point,reorder_level,low_stock_threshold,stock_status,avg_unit_cost_cents,total_stock_value_minor,cost_currency,default_unit_price_cents,default_price_currency,category,supplier_id,notes,unit,sku,active,deleted_at,created_at,updated_at,updated_by,last_override_at,last_override_by,last_override_reason,fx_ngn_per_usd,landed_usd_cents_per_unit,store_price_usd_cents,sell_price_usd_cents,sell_price_lrd_cents,weighted_avg_landed_usd_cents,is_addon,import_batch_id";
+  "id,product_code,product_name,name,quantity_on_hand,reorder_point,reorder_level,low_stock_threshold,stock_status,avg_unit_cost_cents,total_stock_value_minor,cost_currency,default_unit_price_cents,default_price_currency,category,supplier_id,notes,unit,sku,active,deleted_at,created_at,updated_at,updated_by,last_override_at,last_override_by,last_override_reason,fx_ngn_per_usd,landed_usd_cents_per_unit,store_price_usd_cents,sell_price_usd_cents,sell_price_lrd_cents,weighted_avg_landed_usd_cents,is_addon,import_batch_id,item_type,setup_status";
 
 export type SupplierRow = {
   id: string;
@@ -87,6 +87,8 @@ export type InventoryProductRow = {
   last_override_reason?: string | null;
   is_addon?: boolean;
   import_batch_id?: string | null;
+  item_type?: "retail" | "asset" | null;
+  setup_status?: "needs_setup" | "ready" | null;
 };
 
 /** @deprecated use InventoryProductRow */
@@ -197,6 +199,8 @@ export async function fetchAllSuppliersAdmin(supabase: SupabaseClient): Promise<
 export type InventoryListFilters = {
   q?: string;
   status?: StockStatus | "all";
+  /** needs_setup | asset | ready_retail | all */
+  focus?: "needs_setup" | "asset" | "ready_retail" | "all";
 };
 
 export type InventoryPageFilters = InventoryListFilters & {
@@ -210,6 +214,18 @@ export type InventoryPageResult = {
   page: number;
   pageSize: number;
 };
+
+function applyInventoryFocusFilter(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  q: any,
+  focus: InventoryListFilters["focus"],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+  if (focus === "needs_setup") return q.eq("setup_status", "needs_setup");
+  if (focus === "asset") return q.eq("item_type", "asset");
+  if (focus === "ready_retail") return q.eq("item_type", "retail").eq("setup_status", "ready");
+  return q;
+}
 
 export async function fetchInventoryProducts(
   supabase: SupabaseClient,
@@ -228,10 +244,25 @@ export async function fetchInventoryProducts(
   if (filters.status && filters.status !== "all") {
     q = q.eq("stock_status", filters.status);
   }
+  q = applyInventoryFocusFilter(q, filters.focus);
 
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return (data ?? []) as InventoryProductRow[];
+}
+
+/** Active ready retail products with a catalog retail price — for sale typeahead. */
+export async function fetchSellableInventoryProducts(
+  supabase: SupabaseClient,
+): Promise<InventoryProductRow[]> {
+  const items = await fetchInventoryProducts(supabase, { focus: "ready_retail" });
+  return items.filter(
+    (i) =>
+      i.active &&
+      ((i.sell_price_usd_cents != null && i.sell_price_usd_cents > 0) ||
+        (i.sell_price_lrd_cents != null && i.sell_price_lrd_cents > 0) ||
+        (i.store_price_usd_cents != null && i.store_price_usd_cents > 0)),
+  );
 }
 
 export async function fetchInventoryProductsPage(
@@ -260,6 +291,7 @@ export async function fetchInventoryProductsPage(
   if (filters.status && filters.status !== "all") {
     q = q.eq("stock_status", filters.status);
   }
+  q = applyInventoryFocusFilter(q, filters.focus);
 
   const { data, error, count } = await q.range(from, to);
   if (error) throw new Error(error.message);
@@ -294,11 +326,14 @@ export type InventoryStatusSummary = {
 };
 
 export async function fetchInventoryStatusSummary(supabase: SupabaseClient): Promise<InventoryStatusSummary> {
+  // Retail-ready only — assets and needs_setup do not pollute stock health KPIs.
   const { data, error } = await supabase
     .from("inventory_items")
     .select("stock_status")
     .is("deleted_at", null)
-    .eq("active", true);
+    .eq("active", true)
+    .eq("item_type", "retail")
+    .eq("setup_status", "ready");
   if (error) throw new Error(error.message);
   const out: InventoryStatusSummary = { in_stock: 0, low_stock: 0, out_of_stock: 0 };
   for (const r of data ?? []) {
@@ -575,12 +610,16 @@ export async function fetchDashboardRollup(supabase: SupabaseClient): Promise<Da
   since.setUTCDate(since.getUTCDate() - 62);
   const iso = since.toISOString();
 
-  const [statusSummary, items, sales, services] = await Promise.all([
+  const [statusSummary, items, sales, services, settings] = await Promise.all([
     fetchInventoryStatusSummary(supabase),
     fetchInventoryProducts(supabase, {}),
     fetchSalesSince(supabase, iso),
     fetchServiceLogsSince(supabase, iso),
+    fetchOperationalSettings(supabase),
   ]);
+
+  const opFx = resolveOperationalFxFromSettings(settings);
+  const costOpts = { operationalFx: opFx };
 
   const itemById = Object.fromEntries(items.map((i) => [i.id, i]));
 
@@ -588,13 +627,15 @@ export async function fetchDashboardRollup(supabase: SupabaseClient): Promise<Da
   let inventoryValueUsdRollup = 0;
   for (const it of items) {
     if (!it.active || it.deleted_at) continue;
+    // Assets excluded from sellable inventory value KPIs
+    if (it.item_type === "asset") continue;
     const v =
       it.total_stock_value_minor != null
         ? it.total_stock_value_minor
         : Math.round(Number(it.quantity_on_hand) * it.avg_unit_cost_cents);
     const c = it.cost_currency;
     inventoryValueByCurrency[c] += v;
-    inventoryValueUsdRollup += inventoryValueUsdCents(it);
+    inventoryValueUsdRollup += inventoryValueUsdCents(it, costOpts);
   }
 
   const productRevenueUsdByDay: Record<string, number> = {};
@@ -612,11 +653,11 @@ export async function fetchDashboardRollup(supabase: SupabaseClient): Promise<Da
   for (const s of sales) {
     const day = monroviaDayKeyFromIso(s.sold_at);
     const revUsd =
-      s.revenue_usd_equiv_cents ?? lineRevenueUsdEquivCents(s.unit_price_cents, s.qty, s.currency);
+      s.revenue_usd_equiv_cents ?? lineRevenueUsdEquivCents(s.unit_price_cents, s.qty, s.currency, opFx);
     const item = itemById[s.inventory_item_id];
     let gpUsd = s.gross_profit_usd_cents;
     if (gpUsd == null && item) {
-      gpUsd = Math.round(revUsd - s.qty * effectiveUnitCostUsdCents(item));
+      gpUsd = Math.round(revUsd - s.qty * effectiveUnitCostUsdCents(item, costOpts));
     } else if (gpUsd == null) {
       gpUsd = 0;
     }
@@ -630,7 +671,7 @@ export async function fetchDashboardRollup(supabase: SupabaseClient): Promise<Da
 
   for (const s of services) {
     const day = monroviaDayKeyFromIso(s.sold_at);
-    const revUsd = s.revenue_usd_equiv_cents ?? lineRevenueUsdEquivCents(s.revenue_cents, 1, s.currency);
+    const revUsd = s.revenue_usd_equiv_cents ?? lineRevenueUsdEquivCents(s.revenue_cents, 1, s.currency, opFx);
     addDayUsd(serviceRevenueUsdByDay, day, revUsd);
     if (new Date(s.sold_at) >= cutoff30) {
       totalsLast30.serviceRevenueUsd += revUsd;
@@ -700,11 +741,37 @@ export async function fetchLowStockAlerts(supabase: SupabaseClient, limit = 8): 
     .select("id,product_code,product_name,quantity_on_hand,unit,stock_status")
     .is("deleted_at", null)
     .eq("active", true)
+    .eq("item_type", "retail")
+    .eq("setup_status", "ready")
     .in("stock_status", ["low_stock", "out_of_stock"])
     .order("quantity_on_hand")
     .limit(limit);
   if (error) throw new Error(error.message);
   return (data ?? []) as LowStockAlertRow[];
+}
+
+export type InventorySetupProgressRow = {
+  needsSetupCount: number;
+  totalProducts: number;
+  assetCount: number;
+  readyRetailCount: number;
+};
+
+export async function fetchInventorySetupProgress(
+  supabase: SupabaseClient,
+): Promise<InventorySetupProgressRow> {
+  const { data, error } = await supabase
+    .from("inventory_items")
+    .select("item_type,setup_status")
+    .is("deleted_at", null);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as { item_type: string | null; setup_status: string | null }[];
+  return {
+    totalProducts: rows.length,
+    needsSetupCount: rows.filter((r) => r.setup_status === "needs_setup").length,
+    assetCount: rows.filter((r) => r.item_type === "asset").length,
+    readyRetailCount: rows.filter((r) => r.item_type === "retail" && r.setup_status === "ready").length,
+  };
 }
 
 export type TodayRevenueSnapshot = {

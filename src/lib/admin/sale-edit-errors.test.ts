@@ -15,6 +15,9 @@ function mapSaleEditError(message: string, code?: string): string {
   if (msg.includes("sale_not_found") || msg.includes("invalid_sale_id")) return "sale_not_found";
   if (msg.includes("product_not_found") || msg.includes("not_found")) return "product_not_found";
   if (msg.includes("insufficient_stock")) return "insufficient_stock";
+  if (msg.includes("product_needs_setup")) return "product_needs_setup";
+  if (msg.includes("product_not_sellable")) return "product_not_sellable";
+  if (msg.includes("product_missing_retail_price")) return "product_missing_retail_price";
   if (msg.includes("invalid_currency")) return "invalid_currency";
   if (msg.includes("invalid_price")) return "invalid_price";
   if (msg.includes("invalid_quantity") || msg.includes("invalid_qty")) return "invalid_quantity";
@@ -27,6 +30,9 @@ describe("sale edit error codes", () => {
     expect(mapSaleEditError("insufficient_stock")).toBe("insufficient_stock");
     expect(mapSaleEditError("sale_not_found")).toBe("sale_not_found");
     expect(mapSaleEditError("product_not_found")).toBe("product_not_found");
+    expect(mapSaleEditError("product_needs_setup: Dummy Head")).toBe("product_needs_setup");
+    expect(mapSaleEditError("product_not_sellable: Pink Nail Table")).toBe("product_not_sellable");
+    expect(mapSaleEditError("product_missing_retail_price: X")).toBe("product_missing_retail_price");
     expect(mapSaleEditError("edit_reason_required")).toBe("edit_reason_required");
     expect(mapSaleEditError("invalid_currency")).toBe("invalid_currency");
     expect(mapSaleEditError("invalid_price")).toBe("invalid_price");
@@ -56,9 +62,7 @@ describe("sale edit error codes", () => {
 });
 
 describe("reset confirmation contract", () => {
-  it("requires exact phrase", () => {
-    const phrase = "RESET SALES AND INVENTORY";
-    expect("RESET SALES AND INVENTORY").toBe(phrase);
-    expect("reset sales and inventory").not.toBe(phrase);
+  it("defers detailed reset coverage to operational-reset.test.ts", () => {
+    expect(true).toBe(true);
   });
 });

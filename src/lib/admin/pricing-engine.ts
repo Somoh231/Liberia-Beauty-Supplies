@@ -8,12 +8,27 @@
  *   usd_cents = lrd_cents / lrd_per_usd
  *   lrd_cents = usd_cents * lrd_per_usd
  *
- * Baselines: 1 USD = 1385 NGN, 1 USD = 190 LRD.
- * Resolution: valid operational_settings (>0) → official fallback.
+ * FX rate source (runtime preference):
+ *   1. Caller-supplied `OperationalFxRates` from `operational_settings` (via resolveOperationalFxFromSettings)
+ *   2. Item-level `fx_ngn_per_usd` when converting that item's NGN cost
+ *   3. Safe fallback constants DEFAULT_OPERATIONAL_* (seed/baseline 1385 NGN / 190 LRD) — only when settings are absent
+ *
+ * WAC (weighted average cost):
+ *   - Canonical currency is USD. Stored as `weighted_avg_landed_usd_cents`.
+ *   - NGN/LRD purchase costs are converted to USD at entry/receipt using the operational FX rate in effect then.
+ *   - Later FX setting changes do NOT rewrite historical WAC unless an explicit admin recalculation action runs.
+ *
+ * LRD and USD both use 1/100 minor units; never multiply/divide by an extra 100 for FX (no LRD 100× bug).
+ *
+ * Seeded operational baseline: 1 USD = 1,385 NGN · 1 USD = 190 LRD.
  */
 
 import type { SalonCurrency } from "@/lib/admin/salon-format";
 import { parseMoneyToCents } from "@/lib/admin/salon-format";
+import {
+  inventoryNeedsSetup as inventoryNeedsSetupFromStatus,
+  type InventorySetupFields,
+} from "@/lib/admin/inventory-sellability";
 
 /** Minimal row shape for costing — avoids circular imports with `salon-queries`. */
 export type InventoryCostingInput = {
@@ -28,8 +43,9 @@ export type InventoryCostingInput = {
   store_price_usd_cents?: number | null;
 };
 
-/** Official operational NGN/USD baseline — used when `operational_settings.ngn_per_usd` is unset. */
+/** Official operational NGN/USD baseline — seed/fallback ONLY when operational_settings is unset. */
 export const DEFAULT_OPERATIONAL_NGN_PER_USD = 1385;
+/** Official operational LRD/USD baseline — seed/fallback ONLY when operational_settings is unset. */
 export const DEFAULT_OPERATIONAL_LRD_PER_USD = 190;
 
 export type OperationalFxRates = {
@@ -39,7 +55,10 @@ export type OperationalFxRates = {
   lrdPerUsd: number;
 };
 
-/** Env override optional; otherwise official baseline (1385 / 190). */
+/**
+ * Env override optional; otherwise official baseline (1385 / 190).
+ * Prefer `resolveOperationalFxFromSettings` on server paths that load operational_settings.
+ */
 export function getOperationalFx(): OperationalFxRates {
   const rawNgn = process.env.SALON_NGN_PER_USD ?? process.env.NEXT_PUBLIC_SALON_NGN_PER_USD;
   let ngn = DEFAULT_OPERATIONAL_NGN_PER_USD;
@@ -78,9 +97,12 @@ export function getLrdPerUsd(): number {
   return getOperationalFx().lrdPerUsd;
 }
 
-/** Platform NGN/USD baseline when item-level FX is unset (1385 unless env override in getOperationalFx). */
+/**
+ * Platform NGN/USD fallback when settings/`operationalFx` are not available.
+ * Uses env-aware getOperationalFx() — not a silent literal. Still prefer resolveOperationalFxFromSettings.
+ */
 export function getDefaultNgnPerUsd(): number {
-  return DEFAULT_OPERATIONAL_NGN_PER_USD;
+  return getOperationalFx().ngnPerUsd;
 }
 
 /** NGN kobo → USD cents: usd_cents = ngn_kobo / ngn_per_usd */
@@ -99,7 +121,7 @@ export function usdCentsToNgnKobo(usdCents: number, ngnPerUsd: number): number {
 
 /**
  * Convert USD cents → LRD cents: lrd_cents = usd_cents × lrd_per_usd
- * (Both currencies use 1/100 minor units; FX is major-per-major so no extra /100.)
+ * (Both currencies use 1/100 minor units; FX is major-per-major so no extra /100 — avoids LRD 100× bug.)
  */
 export function convertUsdCentsToLrdCents(usdCents: number, lrdPerUsd = getLrdPerUsd()): number {
   if (!Number.isFinite(usdCents) || usdCents < 0) return 0;
@@ -107,7 +129,7 @@ export function convertUsdCentsToLrdCents(usdCents: number, lrdPerUsd = getLrdPe
   return Math.round(usdCents * lrdPerUsd);
 }
 
-/** Convert LRD cents → USD cents: usd_cents = lrd_cents / lrd_per_usd */
+/** Convert LRD cents → USD cents: usd_cents = lrd_cents / lrd_per_usd (no extra ×100). */
 export function convertLrdCentsToUsdCents(lrdCents: number, lrdPerUsd = getLrdPerUsd()): number {
   if (!Number.isFinite(lrdCents) || lrdCents < 0) return 0;
   if (!Number.isFinite(lrdPerUsd) || lrdPerUsd <= 0) return 0;
@@ -116,17 +138,18 @@ export function convertLrdCentsToUsdCents(lrdCents: number, lrdPerUsd = getLrdPe
 
 /**
  * When switching sell currency between USD and LRD, convert the entered unit price (major units string)
- * from `from` to `to`. Returns major-units string with reasonable precision.
+ * from `from` to `to`. Pass `fx` from operational settings when available.
  */
 export function convertRetailUnitMajorOnCurrencySwitch(
   unitPriceMajorStr: string,
   from: "USD" | "LRD",
   to: "USD" | "LRD",
+  fx?: OperationalFxRates,
 ): string {
   if (from === to) return unitPriceMajorStr;
   const cents = parseMoneyToCents(unitPriceMajorStr);
   if (cents == null) return "";
-  const lrd = getLrdPerUsd();
+  const lrd = fx?.lrdPerUsd && fx.lrdPerUsd > 0 ? fx.lrdPerUsd : getLrdPerUsd();
   if (from === "USD" && to === "LRD") {
     const lrdCents = convertUsdCentsToLrdCents(cents, lrd);
     return (lrdCents / 100).toFixed(2);
@@ -156,7 +179,7 @@ function resolveLrdFx(operationalFx?: OperationalFxRates): number {
   return getLrdPerUsd();
 }
 
-/** Weighted-average landed unit cost in USD cents (canonical). */
+/** Weighted-average landed unit cost in USD cents (canonical WAC currency). */
 export function effectiveUnitCostUsdCents(item: InventoryCostingInput, opts?: EffectiveCostOptions): number {
   if (!opts?.ignoreWeightedAvg) {
     const wac = item.weighted_avg_landed_usd_cents;
@@ -180,10 +203,10 @@ export function effectiveUnitCostUsdCents(item: InventoryCostingInput, opts?: Ef
   return landed;
 }
 
-export function inventoryValueUsdCents(item: InventoryCostingInput): number {
+export function inventoryValueUsdCents(item: InventoryCostingInput, opts?: EffectiveCostOptions): number {
   const q = Number(item.quantity_on_hand);
   if (!Number.isFinite(q) || q <= 0) return 0;
-  return Math.round(q * effectiveUnitCostUsdCents(item));
+  return Math.round(q * effectiveUnitCostUsdCents(item, opts));
 }
 
 /** Per-unit gross profit in USD cents (retail USD − landed WAC USD). Negative GP is preserved. */
@@ -285,7 +308,7 @@ export function formatOperationalFxSummaryLineFromRates(rates: OperationalFxRate
 
 /**
  * Line revenue in USD cents for qty × unit price in `currency`.
- * Precedence for NGN: caller should pass item/settings FX via `fx` when available.
+ * When converting NGN/LRD, pass `fx` from operational_settings — do not rely on silent baseline fallback.
  */
 export function lineRevenueUsdEquivCents(
   unitPriceMinor: number,
@@ -333,34 +356,20 @@ export function saleLineFinancialPreview(input: {
 export function complementaryRetailLabel(
   unitPriceMajorStr: string,
   currency: "USD" | "LRD",
+  fx?: OperationalFxRates,
 ): { equivalentLabel: string; equivalentCents: number; equivalentCurrency: "USD" | "LRD" } | null {
   const cents = parseMoneyToCents(unitPriceMajorStr);
   if (cents == null || cents <= 0) return null;
+  const lrdRate = fx?.lrdPerUsd && fx.lrdPerUsd > 0 ? fx.lrdPerUsd : getLrdPerUsd();
   if (currency === "USD") {
-    const lrd = convertUsdCentsToLrdCents(cents);
+    const lrd = convertUsdCentsToLrdCents(cents, lrdRate);
     return { equivalentLabel: "LRD", equivalentCents: lrd, equivalentCurrency: "LRD" };
   }
-  const usd = convertLrdCentsToUsdCents(cents);
+  const usd = convertLrdCentsToUsdCents(cents, lrdRate);
   return { equivalentLabel: "USD", equivalentCents: usd, equivalentCurrency: "USD" };
 }
 
-/** Catalog SKUs that still need owner/manager operational setup. */
-export function inventoryNeedsSetup(item: {
-  quantity_on_hand?: number | null;
-  avg_unit_cost_cents?: number | null;
-  weighted_avg_landed_usd_cents?: number | null;
-  sell_price_usd_cents?: number | null;
-  sell_price_lrd_cents?: number | null;
-  store_price_usd_cents?: number | null;
-  supplier_id?: string | null;
-  fx_ngn_per_usd?: number | null;
-}): boolean {
-  const qty = Number(item.quantity_on_hand ?? 0);
-  const cost = Number(item.avg_unit_cost_cents ?? 0);
-  const wac = Number(item.weighted_avg_landed_usd_cents ?? 0);
-  const hasRetail =
-    (item.sell_price_usd_cents != null && item.sell_price_usd_cents > 0) ||
-    (item.sell_price_lrd_cents != null && item.sell_price_lrd_cents > 0) ||
-    (item.store_price_usd_cents != null && item.store_price_usd_cents > 0);
-  return qty === 0 && cost === 0 && wac === 0 && !hasRetail && !item.supplier_id;
+/** Persist/prefer setup_status via inventory-sellability; re-exported for existing import sites. */
+export function inventoryNeedsSetup(item: InventorySetupFields): boolean {
+  return inventoryNeedsSetupFromStatus(item);
 }

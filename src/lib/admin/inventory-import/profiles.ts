@@ -104,13 +104,20 @@ type CatalogParseContext = ParseContext & {
   profileHint: InventoryImportParserProfile;
 };
 
-/** Catalog-only row: product name + category; no financial inference. */
+/** Catalog-only row: product name (col B) + category; no financial inference. */
 export function parseCatalogNameRow(cells: unknown[], ctx: CatalogParseContext): ParsedInventoryImportRow | null {
-  const nameIdx = ctx.profileHint === "hair_products_mixed" ? 1 : 1;
-  const productName = cellString(cells[nameIdx]).trim() || cellString(cells[0]).trim();
+  // Product names always come from column B — including List of Hair Products
+  // (column A holds "1st List" / "2nd List" markers only).
+  const productName = cellString(cells[1]).trim();
   if (!productName || productName.length < 2) return null;
+  if (/TOTAL/i.test(productName)) return null;
   if (/^\d+(\.\d+)?$/.test(productName)) return null;
   if (/^(s\/?n|list|quantity|retail|rate|item name)$/i.test(productName)) return null;
+
+  const sectionFromColA = cellString(cells[0]).trim();
+  const sectionNote =
+    ctx.sectionNote ||
+    (/^(1st|2nd)\s+list$/i.test(sectionFromColA) ? sectionFromColA : null);
 
   const raw: InventoryImportRawCells = {
     product_name: productName,
@@ -131,9 +138,7 @@ export function parseCatalogNameRow(cells: unknown[], ctx: CatalogParseContext):
   row.skipped = false;
   row.skipReason = null;
   row.duplicateKey = `${row.category}::${productName.toLowerCase()}`;
-  if (ctx.sectionNote) {
-    row.sectionNote = ctx.sectionNote;
-  }
+  row.sectionNote = sectionNote;
   return row;
 }
 

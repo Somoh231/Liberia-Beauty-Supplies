@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { InventoryCatalogResetPanel } from "@/components/admin/inventory-catalog-reset-panel";
 import { OperationalDatasetResetPanel } from "@/components/admin/operational-dataset-reset-panel";
 import { OperationalSettingsForm } from "@/components/admin/operational-settings-form";
 import { requireAdminContext } from "@/lib/auth/admin-context";
@@ -23,11 +22,9 @@ export default async function AdminOperationalSettingsPage() {
         <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold leading-tight text-white">Operational settings</h1>
         <p className="max-w-2xl text-sm text-white/50">Central FX rates and warning thresholds — minimal controls for daily ops.</p>
       </header>
-      {/* Forms stay readable-width (forms are out of scope this phase). */}
       <div className="max-w-3xl space-y-8">
         <OperationalSettingsForm row={row} />
         {ctx.isOwner ? <OperationalDatasetResetPanel /> : null}
-        {ctx.isOwner ? <InventoryCatalogResetPanel /> : null}
       </div>
     </div>
   );

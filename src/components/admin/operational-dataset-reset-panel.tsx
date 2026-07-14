@@ -24,7 +24,7 @@ function errMsg(code: string): string {
     backup_confirmation_required: "Confirm that a database backup / export has been taken.",
     forbidden_owner_required: "Only the business owner can run this reset.",
     migration_required:
-      "Database migration required. Apply 20260603120000_operational_hard_reset_clear_sales_log_revenue.sql on Supabase.",
+      "Database migration required. Apply 20260604120000_operational_reset_remove_nonexistent_preserved_tables.sql on Supabase.",
     preview_failed: "Could not load reset preview counts.",
     reauth_required: "Re-enter your password to authorize this reset.",
     reauth_failed: "Password verification failed.",
@@ -115,9 +115,10 @@ export function OperationalDatasetResetPanel() {
         </h2>
         <p className="mt-2 text-sm text-white/55">
           Permanently deletes all Sales Log transaction history in one transaction: retail sales, service logs,
-          space/rental payments, inventory, movements, purchases, import batches, weekly worksheets, and daily cash
-          reconciliations. Preserves users, RBAC, suppliers, the service catalog and prices, stylist configuration, and
-          operational FX/settings. Does not delete structural configuration — only payment and revenue rows.
+          space/rental payment history, inventory, movements, purchases, import batches, weekly worksheets, and daily
+          cash reconciliations. Preserves auth users, portal RBAC, suppliers, and operational FX/settings. Website and
+          booking service copy live in application code (not database catalog tables) and are unaffected. Service
+          transaction history and rental payment history are deleted.
         </p>
         <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-white/45">
           <li>Take a Supabase backup / export externally.</li>
@@ -163,13 +164,11 @@ export function OperationalDatasetResetPanel() {
               <li>App users (role_id): {preview.preserved.users}</li>
               <li>Role definitions: {preview.preserved.roles}</li>
               <li>Suppliers: {preview.preserved.suppliers}</li>
-              <li>Service catalog: {preview.preserved.services}</li>
-              <li>Stylists: {preview.preserved.stylists}</li>
-              <li>Stylist–service links: {preview.preserved.stylist_services}</li>
               <li>Operational settings: {preview.preserved.operational_settings}</li>
             </ul>
             <p className="mt-2 text-white/40">
-              FX retained: ₦{preview.fx.ngn_per_usd}/USD · LD {preview.fx.lrd_per_usd}/USD
+              FX retained: ₦{preview.fx.ngn_per_usd}/USD · LD {preview.fx.lrd_per_usd}/USD. Website/booking service
+              configuration remains in application code (no DB service/stylist catalog tables in production).
             </p>
           </div>
         </>

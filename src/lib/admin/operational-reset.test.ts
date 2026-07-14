@@ -25,9 +25,14 @@ import {
   type SimulatedResetDataset,
 } from "@/lib/admin/operational-reset";
 
-const MIGRATION_PATH = path.join(
+const WIPE_MIGRATION_PATH = path.join(
   process.cwd(),
   "supabase/migrations/20260603120000_operational_hard_reset_clear_sales_log_revenue.sql",
+);
+
+const PRESERVED_FIX_MIGRATION_PATH = path.join(
+  process.cwd(),
+  "supabase/migrations/20260604120000_operational_reset_remove_nonexistent_preserved_tables.sql",
 );
 
 function emptyWipe(): OperationalResetWipeCounts {
@@ -90,9 +95,6 @@ function sampleDataset(): SimulatedResetDataset {
       users: 3,
       roles: 5,
       operational_settings: 1,
-      services: 12,
-      stylists: 5,
-      stylist_services: 20,
       suppliers: 4,
     },
   };
@@ -249,12 +251,15 @@ describe("operational hard reset contracts", () => {
     expect(result.final.wipe.weekly_service_sales).toEqual([]);
     expect(result.final.wipe.weekly_sales_reports).toEqual([]);
     expect(result.final.preserved).toEqual(preservedBefore);
-    expect(result.final.preserved.services).toBe(12);
-    expect(result.final.preserved.stylists).toBe(5);
     expect(result.final.preserved.auth_users).toBe(3);
     expect(result.final.preserved.users).toBe(3);
     expect(result.final.preserved.roles).toBe(5);
     expect(result.final.preserved.user_profiles).toBe(3);
+    expect(result.final.preserved.suppliers).toBe(4);
+    expect(result.final.preserved.operational_settings).toBe(1);
+    expect(result.final.preserved).not.toHaveProperty("services");
+    expect(result.final.preserved).not.toHaveProperty("stylists");
+    expect(result.final.preserved).not.toHaveProperty("stylist_services");
 
     const zero = emptyWipe();
     expect(assertWipeCountsAreZero(zero)).toBe(true);
@@ -285,7 +290,8 @@ describe("operational hard reset contracts", () => {
     expect(result.rolledBack.wipe.space_lease_payments).toEqual([1, 2, 3]);
     expect(result.rolledBack.wipe.weekly_service_sales).toEqual([1, 2, 3]);
     expect(result.rolledBack.preserved).toEqual(initial.preserved);
-    expect(result.rolledBack.preserved.services).toBe(12);
+    expect(result.rolledBack.preserved.auth_users).toBe(3);
+    expect(result.rolledBack.preserved.suppliers).toBe(4);
   });
 
   it("forced failure after purchase_items still restores legacy child tables", () => {
@@ -349,8 +355,8 @@ describe("operational hard reset contracts", () => {
     expect(assertDeleteUsesWhereTrue("truncate public.sales")).toBe(false);
   });
 
-  it("migration deletes service/rental transaction history and preserves catalog config", () => {
-    const sql = readFileSync(MIGRATION_PATH, "utf8");
+  it("wipe migration deletes service/rental transaction history", () => {
+    const sql = readFileSync(WIPE_MIGRATION_PATH, "utf8");
     const executable = sql
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .split("\n")
@@ -362,36 +368,70 @@ describe("operational hard reset contracts", () => {
     expect(executable).toMatch(/delete from public\.weekly_service_sales where true/i);
     expect(executable).toMatch(/delete from public\.weekly_stylist_space_payments where true/i);
     expect(executable).toMatch(/delete from public\.weekly_sales_reports where true/i);
-    expect(executable).not.toMatch(/delete from public\.services where true/i);
-    expect(executable).not.toMatch(/delete from public\.stylists where true/i);
     expect(executable).not.toMatch(/delete from public\.user_profiles where true/i);
     expect(executable).not.toMatch(/delete from public\.users where true/i);
     expect(executable).not.toMatch(/delete from public\.roles where true/i);
     expect(executable).not.toMatch(/delete from auth\.users where true/i);
     expect(executable).not.toMatch(/delete from public\.suppliers where true/i);
     expect(executable).not.toMatch(/delete from public\.operational_settings where true/i);
-    expect(executable).toMatch(/'services',\s*\(select count\(\*\)::int from public\.services\)/);
-    expect(executable).toMatch(/'stylists',\s*\(select count\(\*\)::int from public\.stylists\)/);
+    expect(executable).not.toMatch(
+      /update public\.service_logs\s+set product_usage/i,
+    );
+
+    expect(OPERATIONAL_RESET_DELETE_ORDER).toContain("service_logs");
+    expect(OPERATIONAL_RESET_DELETE_ORDER).toContain("weekly_service_sales");
+    expect(OPERATIONAL_RESET_DELETE_ORDER).toContain("weekly_stylist_space_payments");
+    expect(OPERATIONAL_RESET_DELETE_ORDER).toContain("space_lease_payments");
+    expect(OPERATIONAL_RESET_REQUIRED_DELETE_SQL).toContain("delete from public.service_logs where true");
+    expect(OPERATIONAL_RESET_REQUIRED_DELETE_SQL).toContain(
+      "delete from public.weekly_service_sales where true",
+    );
+    expect(OPERATIONAL_RESET_REQUIRED_DELETE_SQL).toContain(
+      "delete from public.weekly_stylist_space_payments where true",
+    );
+    expect(OPERATIONAL_RESET_REQUIRED_DELETE_SQL).toContain(
+      "delete from public.space_lease_payments where true",
+    );
+  });
+
+  it("preserved-fix migration has no static refs to nonexistent service/stylist tables", () => {
+    const sql = readFileSync(PRESERVED_FIX_MIGRATION_PATH, "utf8");
+    const executable = sql
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((line) => !/^\s*--/.test(line))
+      .join("\n");
+
+    expect(executable).not.toMatch(/public\.services/i);
+    expect(executable).not.toMatch(/public\.stylists/i);
+    expect(executable).not.toMatch(/public\.stylist_services/i);
+    expect(executable).not.toMatch(/'services'/);
+    expect(executable).not.toMatch(/'stylists'/);
+    expect(executable).not.toMatch(/'stylist_services'/);
+
     expect(executable).toMatch(/'auth_users',\s*\(select count\(\*\)::int from auth\.users\)/);
     expect(executable).toMatch(/'user_profiles',\s*\(select count\(\*\)::int from public\.user_profiles\)/);
     expect(executable).toMatch(/'users',\s*\(select count\(\*\)::int from public\.users\)/);
     expect(executable).toMatch(/'roles',\s*\(select count\(\*\)::int from public\.roles\)/);
-    // product_usage-only clear must not remain as the service strategy
-    expect(executable).not.toMatch(
-      /update public\.service_logs\s+set product_usage/i,
+    expect(executable).toMatch(/'suppliers',\s*\(select count\(\*\)::int from public\.suppliers\)/);
+    expect(executable).toMatch(
+      /'operational_settings',\s*\(select count\(\*\)::int from public\.operational_settings\)/,
     );
+
+    // Wipe targets remain listed in preview delete_order (not preserved)
+    expect(executable).toMatch(/'service_logs'/);
+    expect(executable).toMatch(/'weekly_service_sales'/);
+    expect(executable).toMatch(/'weekly_stylist_space_payments'/);
+    expect(executable).toMatch(/'space_lease_payments'/);
   });
 
-  it("preserved report includes real auth/RBAC sources (not a vague RBAC label alone)", () => {
+  it("preserved report includes real auth/RBAC sources only (no invented catalog tables)", () => {
     const initial = sampleDataset();
     expect(Object.keys(initial.preserved).sort()).toEqual(
       [
         "auth_users",
         "operational_settings",
         "roles",
-        "services",
-        "stylist_services",
-        "stylists",
         "suppliers",
         "user_profiles",
         "users",
@@ -400,20 +440,58 @@ describe("operational hard reset contracts", () => {
     expect(initial.preserved.auth_users).toBe(initial.preserved.user_profiles);
     expect(initial.preserved.roles).toBeGreaterThan(0);
 
-    const sql = readFileSync(MIGRATION_PATH, "utf8");
-    const preservedFn = sql.slice(
-      sql.indexOf("create or replace function public.operational_reset_preserved_counts"),
-      sql.indexOf("comment on function public.operational_reset_preserved_counts"),
-    );
-    expect(preservedFn).toContain("auth.users");
-    expect(preservedFn).toContain("public.user_profiles");
-    expect(preservedFn).toContain("public.users");
-    expect(preservedFn).toContain("public.roles");
-    expect(preservedFn).not.toMatch(/'RBAC'/);
+    const sql = readFileSync(PRESERVED_FIX_MIGRATION_PATH, "utf8");
+    const preservedFnExecutable = sql
+      .slice(
+        sql.indexOf("create or replace function public.operational_reset_preserved_counts"),
+        sql.indexOf("comment on function public.operational_reset_preserved_counts"),
+      )
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((line) => !/^\s*--/.test(line))
+      .join("\n");
+    expect(preservedFnExecutable).toContain("auth.users");
+    expect(preservedFnExecutable).toContain("public.user_profiles");
+    expect(preservedFnExecutable).toContain("public.users");
+    expect(preservedFnExecutable).toContain("public.roles");
+    expect(preservedFnExecutable).toContain("public.suppliers");
+    expect(preservedFnExecutable).toContain("public.operational_settings");
+    expect(preservedFnExecutable).not.toMatch(/public\.services/);
+    expect(preservedFnExecutable).not.toMatch(/public\.stylists/);
+    expect(preservedFnExecutable).not.toMatch(/public\.stylist_services/);
+    expect(preservedFnExecutable).not.toMatch(/'RBAC'/);
 
-    expect(sql).toMatch(/'auth\.users'/);
-    expect(sql).toMatch(/'user_profiles'/);
-    expect(sql).toMatch(/'users'/);
-    expect(sql).toMatch(/'roles'/);
+    const previewExecutable = sql
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((line) => !/^\s*--/.test(line))
+      .join("\n");
+    expect(previewExecutable).toMatch(/'auth\.users'/);
+    expect(previewExecutable).toMatch(/'user_profiles'/);
+    expect(previewExecutable).toMatch(/'users'/);
+    expect(previewExecutable).toMatch(/'roles'/);
+    expect(previewExecutable).toMatch(/'suppliers'/);
+    expect(previewExecutable).toMatch(/'operational_settings'/);
+    expect(previewExecutable).not.toMatch(/'services'/);
+    expect(previewExecutable).not.toMatch(/'stylists'/);
+    expect(previewExecutable).not.toMatch(/'stylist_services'/);
+  });
+
+  it("missing service configuration tables cannot break preserved assertion keys", () => {
+    // Production: to_regclass('public.services') is null — preserved payload must omit those keys.
+    const preserved = sampleDataset().preserved;
+    for (const forbidden of ["services", "stylists", "stylist_services"] as const) {
+      expect(Object.prototype.hasOwnProperty.call(preserved, forbidden)).toBe(false);
+    }
+    for (const required of [
+      "auth_users",
+      "user_profiles",
+      "users",
+      "roles",
+      "suppliers",
+      "operational_settings",
+    ] as const) {
+      expect(typeof preserved[required]).toBe("number");
+    }
   });
 });

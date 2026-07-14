@@ -190,9 +190,6 @@ export type OperationalResetPreservedCounts = {
   roles: number;
   suppliers: number;
   operational_settings: number;
-  services: number;
-  stylists: number;
-  stylist_services: number;
 };
 
 export type OperationalResetPreview = {

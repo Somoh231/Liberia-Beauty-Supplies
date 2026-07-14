@@ -15,13 +15,17 @@ export const OPERATIONAL_RESET_DELETE_ORDER = [
   "purchase_invoices",
   "purchases",
   "weekly_product_sales",
+  "weekly_service_sales",
+  "weekly_stylist_space_payments",
+  "weekly_sales_reports",
   "weekly_log_product_lines",
   "weekly_log_service_lines",
   "weekly_logs",
   "inventory_import_batches",
   "inventory_items",
   "daily_cash_reconciliations",
-  "service_logs.product_usage_clear",
+  "service_logs",
+  "space_lease_payments",
 ] as const;
 
 /**
@@ -36,9 +40,14 @@ export const OPERATIONAL_RESET_REQUIRED_DELETE_SQL = [
   "delete from public.purchase_lines where true",
   "delete from public.purchases where true",
   "delete from public.weekly_product_sales where true",
+  "delete from public.weekly_service_sales where true",
+  "delete from public.weekly_stylist_space_payments where true",
+  "delete from public.weekly_sales_reports where true",
   "delete from public.inventory_import_batches where true",
   "delete from public.inventory_items where true",
   "delete from public.daily_cash_reconciliations where true",
+  "delete from public.service_logs where true",
+  "delete from public.space_lease_payments where true",
 ] as const;
 
 /** Dynamic optional delete template used by safe_delete_table_if_exists. */
@@ -99,13 +108,28 @@ export function wipeCountsWithOptionalTablesAbsent(
 
 /**
  * Legacy weekly retail product lines live in `weekly_product_sales`.
- * Preserved (not wiped): weekly_sales_reports, weekly_service_sales.
+ * Service/rental worksheet lines and report headers are also wiped for clean restart.
  */
 export const LEGACY_PRODUCT_SALE_TABLE_MAPPING = {
   requirementLabel: "weekly/legacy product-sale rows",
   actualTable: "weekly_product_sales",
-  preservedSiblingTables: ["weekly_sales_reports", "weekly_service_sales"] as const,
+  wipedSiblingTables: [
+    "weekly_service_sales",
+    "weekly_stylist_space_payments",
+    "weekly_sales_reports",
+  ] as const,
 } as const;
+
+/** Live Sales Log analytics source tables (must be empty after reset). */
+export const SALES_LOG_REVENUE_SOURCE_TABLES = [
+  "sales",
+  "service_logs",
+  "space_lease_payments",
+  "weekly_product_sales",
+  "weekly_service_sales",
+  "weekly_stylist_space_payments",
+  "weekly_sales_reports",
+] as const;
 
 /** Parent tables that must be wiped only after their child operational tables. */
 export const OPERATIONAL_RESET_PARENT_AFTER_CHILDREN = {
@@ -122,6 +146,11 @@ export const OPERATIONAL_RESET_PARENT_AFTER_CHILDREN = {
   ],
   sales: ["sales_edit_log", "sale_items"],
   purchases: ["purchase_lines", "purchase_items", "purchase_invoices"],
+  weekly_sales_reports: [
+    "weekly_product_sales",
+    "weekly_service_sales",
+    "weekly_stylist_space_payments",
+  ],
 } as const;
 
 export type OperationalResetWipeCounts = {
@@ -136,23 +165,34 @@ export type OperationalResetWipeCounts = {
   purchase_invoices: number;
   purchases: number;
   weekly_product_sales: number;
+  weekly_service_sales: number;
+  weekly_stylist_space_payments: number;
+  weekly_sales_reports: number;
   weekly_log_product_lines: number;
   weekly_log_service_lines: number;
   weekly_logs: number;
   inventory_import_batches: number;
   inventory_items: number;
   daily_cash_reconciliations: number;
+  service_logs: number;
+  space_lease_payments: number;
   service_logs_with_product_usage: number;
 };
 
 export type OperationalResetPreservedCounts = {
+  /** auth.users — authentication identities */
+  auth_users: number;
+  /** Canonical portal role assignment (owner/manager/staff) */
   user_profiles: number;
+  /** Legacy 1:1 auth mirror with role_id */
+  users: number;
+  /** Application role catalog (slug definitions) */
+  roles: number;
   suppliers: number;
-  service_logs: number;
-  space_lease_payments: number;
   operational_settings: number;
-  weekly_sales_reports: number;
-  weekly_service_sales: number;
+  services: number;
+  stylists: number;
+  stylist_services: number;
 };
 
 export type OperationalResetPreview = {
@@ -203,19 +243,121 @@ export function assertWipeCountsAreZero(counts: OperationalResetWipeCounts): boo
     counts.purchase_invoices === 0 &&
     counts.purchases === 0 &&
     counts.weekly_product_sales === 0 &&
+    counts.weekly_service_sales === 0 &&
+    counts.weekly_stylist_space_payments === 0 &&
+    counts.weekly_sales_reports === 0 &&
     counts.weekly_log_product_lines === 0 &&
     counts.weekly_log_service_lines === 0 &&
     counts.weekly_logs === 0 &&
     counts.inventory_import_batches === 0 &&
     counts.inventory_items === 0 &&
     counts.daily_cash_reconciliations === 0 &&
+    counts.service_logs === 0 &&
+    counts.space_lease_payments === 0 &&
     counts.service_logs_with_product_usage === 0
   );
 }
 
+/** Empty currency bag used by Sales Log analytics. */
+export type SaleLogCurrencyTotals = { USD: number; LRD: number };
+
+export type SaleLogRevenueTotals = {
+  weekRetailUsdCents: number;
+  weekServiceUsdCents: number;
+  monthRetailUsdCents: number;
+  monthServiceUsdCents: number;
+  ytdRetailUsdCents: number;
+  ytdServiceUsdCents: number;
+  weekRentalUsdCents: number;
+  monthRentalUsdCents: number;
+  weekNative: { retail: SaleLogCurrencyTotals; service: SaleLogCurrencyTotals; rental: SaleLogCurrencyTotals };
+  monthNative: { retail: SaleLogCurrencyTotals; service: SaleLogCurrencyTotals; rental: SaleLogCurrencyTotals };
+  ytdNative: { retail: SaleLogCurrencyTotals; service: SaleLogCurrencyTotals; rental: SaleLogCurrencyTotals };
+};
+
+function emptyNativeBag(): SaleLogCurrencyTotals {
+  return { USD: 0, LRD: 0 };
+}
+
+/** Analytics shape when all Sales Log source tables are empty (post-reset). */
+export function emptySaleLogRevenueTotals(): SaleLogRevenueTotals {
+  const emptyGroup = {
+    retail: emptyNativeBag(),
+    service: emptyNativeBag(),
+    rental: emptyNativeBag(),
+  };
+  return {
+    weekRetailUsdCents: 0,
+    weekServiceUsdCents: 0,
+    monthRetailUsdCents: 0,
+    monthServiceUsdCents: 0,
+    ytdRetailUsdCents: 0,
+    ytdServiceUsdCents: 0,
+    weekRentalUsdCents: 0,
+    monthRentalUsdCents: 0,
+    weekNative: structuredClone(emptyGroup),
+    monthNative: structuredClone(emptyGroup),
+    ytdNative: structuredClone(emptyGroup),
+  };
+}
+
+export function assertSaleLogRevenueTotalsAreZero(totals: SaleLogRevenueTotals): boolean {
+  const bags = [
+    totals.weekNative.retail,
+    totals.weekNative.service,
+    totals.weekNative.rental,
+    totals.monthNative.retail,
+    totals.monthNative.service,
+    totals.monthNative.rental,
+    totals.ytdNative.retail,
+    totals.ytdNative.service,
+    totals.ytdNative.rental,
+  ];
+  return (
+    totals.weekRetailUsdCents === 0 &&
+    totals.weekServiceUsdCents === 0 &&
+    totals.monthRetailUsdCents === 0 &&
+    totals.monthServiceUsdCents === 0 &&
+    totals.ytdRetailUsdCents === 0 &&
+    totals.ytdServiceUsdCents === 0 &&
+    totals.weekRentalUsdCents === 0 &&
+    totals.monthRentalUsdCents === 0 &&
+    bags.every((b) => b.USD === 0 && b.LRD === 0)
+  );
+}
+
+/**
+ * Derive Sales Log totals from wipe counts — all revenue sources empty ⇒ all totals zero.
+ * Used by unit tests to prove post-reset Sales Log math without hitting the DB.
+ */
+export function saleLogTotalsFromWipeCounts(counts: OperationalResetWipeCounts): SaleLogRevenueTotals {
+  if (
+    counts.sales !== 0 ||
+    counts.service_logs !== 0 ||
+    counts.space_lease_payments !== 0 ||
+    counts.weekly_product_sales !== 0 ||
+    counts.weekly_service_sales !== 0 ||
+    counts.weekly_stylist_space_payments !== 0 ||
+    counts.weekly_sales_reports !== 0
+  ) {
+    // Non-zero sources: tests should not treat this as a clean Sales Log.
+    return {
+      ...emptySaleLogRevenueTotals(),
+      weekRetailUsdCents: counts.sales,
+      weekServiceUsdCents: counts.service_logs,
+      weekRentalUsdCents: counts.space_lease_payments,
+      monthRetailUsdCents: counts.sales,
+      monthServiceUsdCents: counts.service_logs,
+      monthRentalUsdCents: counts.space_lease_payments,
+      ytdRetailUsdCents: counts.sales,
+      ytdServiceUsdCents: counts.service_logs,
+    };
+  }
+  return emptySaleLogRevenueTotals();
+}
+
 export type SimulatedResetDataset = {
   wipe: Record<(typeof OPERATIONAL_RESET_DELETE_ORDER)[number], number[]>;
-  service_logs: { id: string; product_usage: unknown[]; revenue: number }[];
   preserved: OperationalResetPreservedCounts;
 };
 
@@ -232,14 +374,7 @@ export function simulateOperationalReset(
 
   try {
     for (const step of OPERATIONAL_RESET_DELETE_ORDER) {
-      if (step === "service_logs.product_usage_clear") {
-        working.service_logs = working.service_logs.map((row) => ({
-          ...row,
-          product_usage: [],
-        }));
-      } else {
-        working.wipe[step] = [];
-      }
+      working.wipe[step] = [];
       if (opts?.failAfterStep && opts.failAfterStep === step) {
         throw new Error("forced_test_failure");
       }

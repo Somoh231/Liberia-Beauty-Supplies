@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   LEGACY_PRODUCT_SALE_TABLE_MAPPING,
   OPERATIONAL_RESET_CONFIRM_PHRASE,
@@ -7,17 +9,54 @@ import {
   OPERATIONAL_RESET_OPTIONAL_LEGACY_TABLES,
   OPERATIONAL_RESET_PARENT_AFTER_CHILDREN,
   OPERATIONAL_RESET_REQUIRED_DELETE_SQL,
+  SALES_LOG_REVENUE_SOURCE_TABLES,
   assertDeleteUsesWhereTrue,
+  assertSaleLogRevenueTotalsAreZero,
   assertWipeCountsAreZero,
   canEnableOperationalReset,
+  emptySaleLogRevenueTotals,
   formatForeignKeyViolationError,
   isExactResetConfirmation,
   mapOperationalResetError,
+  saleLogTotalsFromWipeCounts,
   simulateOperationalReset,
   wipeCountsWithOptionalTablesAbsent,
   type OperationalResetWipeCounts,
   type SimulatedResetDataset,
 } from "@/lib/admin/operational-reset";
+
+const MIGRATION_PATH = path.join(
+  process.cwd(),
+  "supabase/migrations/20260603120000_operational_hard_reset_clear_sales_log_revenue.sql",
+);
+
+function emptyWipe(): OperationalResetWipeCounts {
+  return {
+    sales_edit_log: 0,
+    inventory_movements: 0,
+    stock_movements: 0,
+    inventory_correction_log: 0,
+    sale_items: 0,
+    sales: 0,
+    purchase_lines: 0,
+    purchase_items: 0,
+    purchase_invoices: 0,
+    purchases: 0,
+    weekly_product_sales: 0,
+    weekly_service_sales: 0,
+    weekly_stylist_space_payments: 0,
+    weekly_sales_reports: 0,
+    weekly_log_product_lines: 0,
+    weekly_log_service_lines: 0,
+    weekly_logs: 0,
+    inventory_import_batches: 0,
+    inventory_items: 0,
+    daily_cash_reconciliations: 0,
+    service_logs: 0,
+    space_lease_payments: 0,
+    service_logs_with_product_usage: 0,
+  };
+}
 
 function sampleDataset(): SimulatedResetDataset {
   return {
@@ -33,26 +72,28 @@ function sampleDataset(): SimulatedResetDataset {
       purchase_invoices: [1],
       purchases: [1],
       weekly_product_sales: [1, 2],
+      weekly_service_sales: [1, 2, 3],
+      weekly_stylist_space_payments: [1],
+      weekly_sales_reports: [1, 2],
       weekly_log_product_lines: [1],
       weekly_log_service_lines: [1],
       weekly_logs: [1],
       inventory_import_batches: [1],
       inventory_items: [1, 2, 3],
       daily_cash_reconciliations: [1],
-      "service_logs.product_usage_clear": [],
+      service_logs: [1, 2],
+      space_lease_payments: [1, 2, 3],
     },
-    service_logs: [
-      { id: "s1", product_usage: [{ inventory_item_id: "i1", qty: 1 }], revenue: 5000 },
-      { id: "s2", product_usage: [], revenue: 2000 },
-    ],
     preserved: {
+      auth_users: 3,
       user_profiles: 3,
-      suppliers: 4,
-      service_logs: 2,
-      space_lease_payments: 1,
+      users: 3,
+      roles: 5,
       operational_settings: 1,
-      weekly_sales_reports: 2,
-      weekly_service_sales: 5,
+      services: 12,
+      stylists: 5,
+      stylist_services: 20,
+      suppliers: 4,
     },
   };
 }
@@ -65,13 +106,14 @@ describe("operational hard reset contracts", () => {
     expect(isExactResetConfirmation(" RESET SALES AND INVENTORY ")).toBe(true);
   });
 
-  it("maps legacy product-sale rows to weekly_product_sales", () => {
+  it("maps legacy product-sale rows and wipes worksheet siblings", () => {
     expect(LEGACY_PRODUCT_SALE_TABLE_MAPPING.actualTable).toBe("weekly_product_sales");
-    expect(LEGACY_PRODUCT_SALE_TABLE_MAPPING.preservedSiblingTables).toContain("weekly_sales_reports");
-    expect(LEGACY_PRODUCT_SALE_TABLE_MAPPING.preservedSiblingTables).toContain("weekly_service_sales");
+    expect(LEGACY_PRODUCT_SALE_TABLE_MAPPING.wipedSiblingTables).toContain("weekly_service_sales");
+    expect(LEGACY_PRODUCT_SALE_TABLE_MAPPING.wipedSiblingTables).toContain("weekly_sales_reports");
+    expect(LEGACY_PRODUCT_SALE_TABLE_MAPPING.wipedSiblingTables).toContain("weekly_stylist_space_payments");
   });
 
-  it("documents FK-safe delete order with legacy child tables before parents", () => {
+  it("documents FK-safe delete order including Sales Log revenue sources", () => {
     expect([...OPERATIONAL_RESET_DELETE_ORDER]).toEqual([
       "sales_edit_log",
       "inventory_movements",
@@ -84,13 +126,17 @@ describe("operational hard reset contracts", () => {
       "purchase_invoices",
       "purchases",
       "weekly_product_sales",
+      "weekly_service_sales",
+      "weekly_stylist_space_payments",
+      "weekly_sales_reports",
       "weekly_log_product_lines",
       "weekly_log_service_lines",
       "weekly_logs",
       "inventory_import_batches",
       "inventory_items",
       "daily_cash_reconciliations",
-      "service_logs.product_usage_clear",
+      "service_logs",
+      "space_lease_payments",
     ]);
 
     const idx = (name: (typeof OPERATIONAL_RESET_DELETE_ORDER)[number]) =>
@@ -105,6 +151,21 @@ describe("operational hard reset contracts", () => {
     for (const child of OPERATIONAL_RESET_PARENT_AFTER_CHILDREN.purchases) {
       expect(idx(child as (typeof OPERATIONAL_RESET_DELETE_ORDER)[number])).toBeLessThan(idx("purchases"));
     }
+    for (const child of OPERATIONAL_RESET_PARENT_AFTER_CHILDREN.weekly_sales_reports) {
+      expect(idx(child)).toBeLessThan(idx("weekly_sales_reports"));
+    }
+  });
+
+  it("identifies Sales Log revenue source tables", () => {
+    expect([...SALES_LOG_REVENUE_SOURCE_TABLES]).toEqual([
+      "sales",
+      "service_logs",
+      "space_lease_payments",
+      "weekly_product_sales",
+      "weekly_service_sales",
+      "weekly_stylist_space_payments",
+      "weekly_sales_reports",
+    ]);
   });
 
   it("requires preview, backup, phrase, and reauth before enable", () => {
@@ -172,7 +233,7 @@ describe("operational hard reset contracts", () => {
     ).toBe("foreign_key_violation:stock_movements:stock_movements_inventory_item_id_fkey");
   });
 
-  it("empties wipe-scope tables including legacy FK blockers", () => {
+  it("empties wipe-scope tables including Sales Log service and rental history", () => {
     const initial = sampleDataset();
     const preservedBefore = { ...initial.preserved };
     const result = simulateOperationalReset(initial);
@@ -180,41 +241,35 @@ describe("operational hard reset contracts", () => {
     if (!result.ok) return;
 
     for (const step of OPERATIONAL_RESET_DELETE_ORDER) {
-      if (step === "service_logs.product_usage_clear") continue;
       expect(result.final.wipe[step]).toEqual([]);
     }
 
-    expect(result.final.wipe.stock_movements).toEqual([]);
-    expect(result.final.wipe.purchase_items).toEqual([]);
-    expect(result.final.wipe.sale_items).toEqual([]);
-    expect(result.final.wipe.purchase_invoices).toEqual([]);
-    expect(result.final.wipe.weekly_log_product_lines).toEqual([]);
-    expect(result.final.service_logs).toHaveLength(2);
-    expect(result.final.service_logs.every((s) => s.product_usage.length === 0)).toBe(true);
-    expect(result.final.service_logs.map((s) => s.revenue)).toEqual([5000, 2000]);
+    expect(result.final.wipe.service_logs).toEqual([]);
+    expect(result.final.wipe.space_lease_payments).toEqual([]);
+    expect(result.final.wipe.weekly_service_sales).toEqual([]);
+    expect(result.final.wipe.weekly_sales_reports).toEqual([]);
     expect(result.final.preserved).toEqual(preservedBefore);
+    expect(result.final.preserved.services).toBe(12);
+    expect(result.final.preserved.stylists).toBe(5);
+    expect(result.final.preserved.auth_users).toBe(3);
+    expect(result.final.preserved.users).toBe(3);
+    expect(result.final.preserved.roles).toBe(5);
+    expect(result.final.preserved.user_profiles).toBe(3);
 
-    const zero: OperationalResetWipeCounts = {
-      sales_edit_log: 0,
-      inventory_movements: 0,
-      stock_movements: 0,
-      inventory_correction_log: 0,
-      sale_items: 0,
-      sales: 0,
-      purchase_lines: 0,
-      purchase_items: 0,
-      purchase_invoices: 0,
-      purchases: 0,
-      weekly_product_sales: 0,
-      weekly_log_product_lines: 0,
-      weekly_log_service_lines: 0,
-      weekly_logs: 0,
-      inventory_import_batches: 0,
-      inventory_items: 0,
-      daily_cash_reconciliations: 0,
-      service_logs_with_product_usage: result.final.service_logs.filter((s) => s.product_usage.length > 0).length,
-    };
+    const zero = emptyWipe();
     expect(assertWipeCountsAreZero(zero)).toBe(true);
+
+    const salesLogTotals = saleLogTotalsFromWipeCounts(zero);
+    expect(assertSaleLogRevenueTotalsAreZero(salesLogTotals)).toBe(true);
+    expect(salesLogTotals).toEqual(emptySaleLogRevenueTotals());
+    expect(salesLogTotals.weekRetailUsdCents).toBe(0);
+    expect(salesLogTotals.weekServiceUsdCents).toBe(0);
+    expect(salesLogTotals.weekRentalUsdCents).toBe(0);
+    expect(salesLogTotals.monthRetailUsdCents).toBe(0);
+    expect(salesLogTotals.monthServiceUsdCents).toBe(0);
+    expect(salesLogTotals.monthRentalUsdCents).toBe(0);
+    expect(salesLogTotals.ytdRetailUsdCents).toBe(0);
+    expect(salesLogTotals.ytdServiceUsdCents).toBe(0);
   });
 
   it("rolls back fully when a mid-delete failure is forced (transactionality)", () => {
@@ -226,14 +281,11 @@ describe("operational hard reset contracts", () => {
     expect(result.error).toBe("forced_test_failure");
     expect(result.rolledBack.wipe.sales_edit_log).toEqual([1, 2]);
     expect(result.rolledBack.wipe.sales).toEqual([10, 11, 12]);
-    expect(result.rolledBack.wipe.stock_movements).toEqual([1, 2]);
-    expect(result.rolledBack.wipe.purchase_items).toEqual([1, 2, 3]);
-    expect(result.rolledBack.wipe.sale_items).toEqual([1]);
-    expect(result.rolledBack.wipe.purchase_invoices).toEqual([1]);
-    expect(result.rolledBack.wipe.weekly_logs).toEqual([1]);
-    expect(result.rolledBack.wipe.inventory_items).toEqual([1, 2, 3]);
-    expect(result.rolledBack.service_logs[0]?.product_usage).toHaveLength(1);
+    expect(result.rolledBack.wipe.service_logs).toEqual([1, 2]);
+    expect(result.rolledBack.wipe.space_lease_payments).toEqual([1, 2, 3]);
+    expect(result.rolledBack.wipe.weekly_service_sales).toEqual([1, 2, 3]);
     expect(result.rolledBack.preserved).toEqual(initial.preserved);
+    expect(result.rolledBack.preserved.services).toBe(12);
   });
 
   it("forced failure after purchase_items still restores legacy child tables", () => {
@@ -246,29 +298,20 @@ describe("operational hard reset contracts", () => {
     expect(result.rolledBack.wipe.stock_movements).toEqual([1, 2]);
     expect(result.rolledBack.wipe.sale_items).toEqual([1]);
     expect(result.rolledBack.wipe.inventory_items.length).toBe(3);
+    expect(result.rolledBack.wipe.service_logs.length).toBe(2);
   });
 
   it("treats missing optional legacy tables as zero counts (safe_table_count contract)", () => {
-    const present = new Set<string>(); // none of the optional legacy tables exist
+    const present = new Set<string>();
     const raw: OperationalResetWipeCounts = {
-      sales_edit_log: 0,
-      inventory_movements: 0,
+      ...emptyWipe(),
       stock_movements: 99,
-      inventory_correction_log: 0,
       sale_items: 42,
-      sales: 0,
-      purchase_lines: 0,
       purchase_items: 7,
       purchase_invoices: 3,
-      purchases: 0,
-      weekly_product_sales: 0,
       weekly_log_product_lines: 5,
       weekly_log_service_lines: 4,
       weekly_logs: 2,
-      inventory_import_batches: 0,
-      inventory_items: 0,
-      daily_cash_reconciliations: 0,
-      service_logs_with_product_usage: 0,
     };
     const coerced = wipeCountsWithOptionalTablesAbsent(raw, present);
     expect(coerced.sale_items).toBe(0);
@@ -278,7 +321,6 @@ describe("operational hard reset contracts", () => {
     expect(coerced.weekly_logs).toBe(0);
     expect(assertWipeCountsAreZero(coerced)).toBe(true);
 
-    // When optional tables ARE present, raw counts are preserved.
     const allPresent = new Set<string>([...OPERATIONAL_RESET_OPTIONAL_LEGACY_TABLES]);
     expect(wipeCountsWithOptionalTablesAbsent(raw, allPresent).sale_items).toBe(42);
   });
@@ -305,5 +347,73 @@ describe("operational hard reset contracts", () => {
     expect(assertDeleteUsesWhereTrue(OPERATIONAL_RESET_OPTIONAL_DELETE_SQL_TEMPLATE)).toBe(true);
     expect(assertDeleteUsesWhereTrue("delete from public.sales")).toBe(false);
     expect(assertDeleteUsesWhereTrue("truncate public.sales")).toBe(false);
+  });
+
+  it("migration deletes service/rental transaction history and preserves catalog config", () => {
+    const sql = readFileSync(MIGRATION_PATH, "utf8");
+    const executable = sql
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((line) => !/^\s*--/.test(line))
+      .join("\n");
+
+    expect(executable).toMatch(/delete from public\.service_logs where true/i);
+    expect(executable).toMatch(/delete from public\.space_lease_payments where true/i);
+    expect(executable).toMatch(/delete from public\.weekly_service_sales where true/i);
+    expect(executable).toMatch(/delete from public\.weekly_stylist_space_payments where true/i);
+    expect(executable).toMatch(/delete from public\.weekly_sales_reports where true/i);
+    expect(executable).not.toMatch(/delete from public\.services where true/i);
+    expect(executable).not.toMatch(/delete from public\.stylists where true/i);
+    expect(executable).not.toMatch(/delete from public\.user_profiles where true/i);
+    expect(executable).not.toMatch(/delete from public\.users where true/i);
+    expect(executable).not.toMatch(/delete from public\.roles where true/i);
+    expect(executable).not.toMatch(/delete from auth\.users where true/i);
+    expect(executable).not.toMatch(/delete from public\.suppliers where true/i);
+    expect(executable).not.toMatch(/delete from public\.operational_settings where true/i);
+    expect(executable).toMatch(/'services',\s*\(select count\(\*\)::int from public\.services\)/);
+    expect(executable).toMatch(/'stylists',\s*\(select count\(\*\)::int from public\.stylists\)/);
+    expect(executable).toMatch(/'auth_users',\s*\(select count\(\*\)::int from auth\.users\)/);
+    expect(executable).toMatch(/'user_profiles',\s*\(select count\(\*\)::int from public\.user_profiles\)/);
+    expect(executable).toMatch(/'users',\s*\(select count\(\*\)::int from public\.users\)/);
+    expect(executable).toMatch(/'roles',\s*\(select count\(\*\)::int from public\.roles\)/);
+    // product_usage-only clear must not remain as the service strategy
+    expect(executable).not.toMatch(
+      /update public\.service_logs\s+set product_usage/i,
+    );
+  });
+
+  it("preserved report includes real auth/RBAC sources (not a vague RBAC label alone)", () => {
+    const initial = sampleDataset();
+    expect(Object.keys(initial.preserved).sort()).toEqual(
+      [
+        "auth_users",
+        "operational_settings",
+        "roles",
+        "services",
+        "stylist_services",
+        "stylists",
+        "suppliers",
+        "user_profiles",
+        "users",
+      ].sort(),
+    );
+    expect(initial.preserved.auth_users).toBe(initial.preserved.user_profiles);
+    expect(initial.preserved.roles).toBeGreaterThan(0);
+
+    const sql = readFileSync(MIGRATION_PATH, "utf8");
+    const preservedFn = sql.slice(
+      sql.indexOf("create or replace function public.operational_reset_preserved_counts"),
+      sql.indexOf("comment on function public.operational_reset_preserved_counts"),
+    );
+    expect(preservedFn).toContain("auth.users");
+    expect(preservedFn).toContain("public.user_profiles");
+    expect(preservedFn).toContain("public.users");
+    expect(preservedFn).toContain("public.roles");
+    expect(preservedFn).not.toMatch(/'RBAC'/);
+
+    expect(sql).toMatch(/'auth\.users'/);
+    expect(sql).toMatch(/'user_profiles'/);
+    expect(sql).toMatch(/'users'/);
+    expect(sql).toMatch(/'roles'/);
   });
 });

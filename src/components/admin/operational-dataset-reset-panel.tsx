@@ -24,7 +24,7 @@ function errMsg(code: string): string {
     backup_confirmation_required: "Confirm that a database backup / export has been taken.",
     forbidden_owner_required: "Only the business owner can run this reset.",
     migration_required:
-      "Database migration required. Apply 20260601120000_operational_hard_reset_safe_delete_where_true.sql on Supabase.",
+      "Database migration required. Apply 20260603120000_operational_hard_reset_clear_sales_log_revenue.sql on Supabase.",
     preview_failed: "Could not load reset preview counts.",
     reauth_required: "Re-enter your password to authorize this reset.",
     reauth_failed: "Password verification failed.",
@@ -59,19 +59,23 @@ function WipeCountsList({ title, counts }: { title: string; counts: OperationalR
         <li>Stock movements: {counts.stock_movements ?? 0}</li>
         <li>Correction logs: {counts.inventory_correction_log}</li>
         <li>Sale items: {counts.sale_items ?? 0}</li>
-        <li>Sales: {counts.sales}</li>
+        <li>Sales (retail): {counts.sales}</li>
+        <li>Service logs: {counts.service_logs ?? 0}</li>
+        <li>Space lease payments: {counts.space_lease_payments ?? 0}</li>
         <li>Purchase lines: {counts.purchase_lines}</li>
         <li>Purchase items: {counts.purchase_items ?? 0}</li>
         <li>Purchase invoices: {counts.purchase_invoices ?? 0}</li>
         <li>Purchases: {counts.purchases}</li>
         <li>Weekly product sales: {counts.weekly_product_sales}</li>
+        <li>Weekly service sales: {counts.weekly_service_sales ?? 0}</li>
+        <li>Weekly stylist space payments: {counts.weekly_stylist_space_payments ?? 0}</li>
+        <li>Weekly sales reports: {counts.weekly_sales_reports ?? 0}</li>
         <li>Weekly log product lines: {counts.weekly_log_product_lines ?? 0}</li>
         <li>Weekly log service lines: {counts.weekly_log_service_lines ?? 0}</li>
         <li>Weekly logs: {counts.weekly_logs ?? 0}</li>
         <li>Import batches: {counts.inventory_import_batches}</li>
         <li>Inventory items: {counts.inventory_items}</li>
         <li>Daily reconciliations: {counts.daily_cash_reconciliations}</li>
-        <li>Service usage arrays to clear: {counts.service_logs_with_product_usage}</li>
       </ul>
     </div>
   );
@@ -110,9 +114,10 @@ export function OperationalDatasetResetPanel() {
           Reset sales &amp; inventory dataset
         </h2>
         <p className="mt-2 text-sm text-white/55">
-          Permanently deletes retail sales, inventory, movements, purchases, import batches, and daily cash
-          reconciliations in one transaction. Preserves users, RBAC, suppliers, service rows/revenue, space leases, and
-          operational settings. Clears service product_usage links only.
+          Permanently deletes all Sales Log transaction history in one transaction: retail sales, service logs,
+          space/rental payments, inventory, movements, purchases, import batches, weekly worksheets, and daily cash
+          reconciliations. Preserves users, RBAC, suppliers, the service catalog and prices, stylist configuration, and
+          operational FX/settings. Does not delete structural configuration — only payment and revenue rows.
         </p>
         <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-white/45">
           <li>Take a Supabase backup / export externally.</li>
@@ -153,12 +158,15 @@ export function OperationalDatasetResetPanel() {
           <div className="rounded-lg border border-white/10 bg-black/20 px-4 py-3 text-xs text-white/55">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">Preserved (unchanged)</p>
             <ul className="mt-2 grid gap-1 sm:grid-cols-2">
-              <li>User profiles: {preview.preserved.user_profiles}</li>
+              <li>Auth users: {preview.preserved.auth_users}</li>
+              <li>User profiles (roles): {preview.preserved.user_profiles}</li>
+              <li>App users (role_id): {preview.preserved.users}</li>
+              <li>Role definitions: {preview.preserved.roles}</li>
               <li>Suppliers: {preview.preserved.suppliers}</li>
-              <li>Service logs: {preview.preserved.service_logs}</li>
-              <li>Space leases: {preview.preserved.space_lease_payments}</li>
+              <li>Service catalog: {preview.preserved.services}</li>
+              <li>Stylists: {preview.preserved.stylists}</li>
+              <li>Stylist–service links: {preview.preserved.stylist_services}</li>
               <li>Operational settings: {preview.preserved.operational_settings}</li>
-              <li>Weekly service sales: {preview.preserved.weekly_service_sales}</li>
             </ul>
             <p className="mt-2 text-white/40">
               FX retained: ₦{preview.fx.ngn_per_usd}/USD · LD {preview.fx.lrd_per_usd}/USD

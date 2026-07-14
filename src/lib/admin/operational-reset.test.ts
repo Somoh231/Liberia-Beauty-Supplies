@@ -3,8 +3,10 @@ import {
   LEGACY_PRODUCT_SALE_TABLE_MAPPING,
   OPERATIONAL_RESET_CONFIRM_PHRASE,
   OPERATIONAL_RESET_DELETE_ORDER,
+  OPERATIONAL_RESET_PARENT_AFTER_CHILDREN,
   assertWipeCountsAreZero,
   canEnableOperationalReset,
+  formatForeignKeyViolationError,
   isExactResetConfirmation,
   mapOperationalResetError,
   simulateOperationalReset,
@@ -19,11 +21,16 @@ function sampleDataset(): SimulatedResetDataset {
       inventory_movements: [1],
       stock_movements: [1, 2],
       inventory_correction_log: [1],
+      sale_items: [1],
       sales: [10, 11, 12],
       purchase_lines: [1],
       purchase_items: [1, 2, 3],
+      purchase_invoices: [1],
       purchases: [1],
       weekly_product_sales: [1, 2],
+      weekly_log_product_lines: [1],
+      weekly_log_service_lines: [1],
+      weekly_logs: [1],
       inventory_import_batches: [1],
       inventory_items: [1, 2, 3],
       daily_cash_reconciliations: [1],
@@ -59,29 +66,40 @@ describe("operational hard reset contracts", () => {
     expect(LEGACY_PRODUCT_SALE_TABLE_MAPPING.preservedSiblingTables).toContain("weekly_service_sales");
   });
 
-  it("documents FK-safe delete order including stock_movements and purchase_items", () => {
+  it("documents FK-safe delete order with legacy child tables before parents", () => {
     expect([...OPERATIONAL_RESET_DELETE_ORDER]).toEqual([
       "sales_edit_log",
       "inventory_movements",
       "stock_movements",
       "inventory_correction_log",
+      "sale_items",
       "sales",
       "purchase_lines",
       "purchase_items",
+      "purchase_invoices",
       "purchases",
       "weekly_product_sales",
+      "weekly_log_product_lines",
+      "weekly_log_service_lines",
+      "weekly_logs",
       "inventory_import_batches",
       "inventory_items",
       "daily_cash_reconciliations",
       "service_logs.product_usage_clear",
     ]);
 
-    expect(OPERATIONAL_RESET_DELETE_ORDER.indexOf("stock_movements")).toBeLessThan(
-      OPERATIONAL_RESET_DELETE_ORDER.indexOf("inventory_items"),
-    );
-    expect(OPERATIONAL_RESET_DELETE_ORDER.indexOf("purchase_items")).toBeLessThan(
-      OPERATIONAL_RESET_DELETE_ORDER.indexOf("inventory_items"),
-    );
+    const idx = (name: (typeof OPERATIONAL_RESET_DELETE_ORDER)[number]) =>
+      OPERATIONAL_RESET_DELETE_ORDER.indexOf(name);
+
+    for (const child of OPERATIONAL_RESET_PARENT_AFTER_CHILDREN.inventory_items) {
+      expect(idx(child as (typeof OPERATIONAL_RESET_DELETE_ORDER)[number])).toBeLessThan(idx("inventory_items"));
+    }
+    for (const child of OPERATIONAL_RESET_PARENT_AFTER_CHILDREN.sales) {
+      expect(idx(child as (typeof OPERATIONAL_RESET_DELETE_ORDER)[number])).toBeLessThan(idx("sales"));
+    }
+    for (const child of OPERATIONAL_RESET_PARENT_AFTER_CHILDREN.purchases) {
+      expect(idx(child as (typeof OPERATIONAL_RESET_DELETE_ORDER)[number])).toBeLessThan(idx("purchases"));
+    }
   });
 
   it("requires preview, backup, phrase, and reauth before enable", () => {
@@ -126,13 +144,30 @@ describe("operational hard reset contracts", () => {
     ).toBe(false);
   });
 
-  it("maps non-owner and wrong-phrase RPC errors", () => {
+  it("exposes specific RPC errors instead of a blind reset_failed", () => {
     expect(mapOperationalResetError("unauthorized")).toBe("forbidden_owner_required");
     expect(mapOperationalResetError("confirmation_mismatch")).toBe("confirmation_mismatch");
     expect(mapOperationalResetError("reauth_required")).toBe("reauth_required");
+    expect(mapOperationalResetError("reset_incomplete: inventory_items, purchase_items")).toBe(
+      "reset_incomplete: inventory_items, purchase_items",
+    );
+    expect(mapOperationalResetError("preserved_data_changed: before={} after={}")).toMatch(
+      /^preserved_data_changed:/,
+    );
+    expect(
+      mapOperationalResetError(
+        'update or delete on table "inventory_items" violates foreign key constraint "purchase_items_product_id_fkey" on table "purchase_items"',
+        "23503",
+      ),
+    ).toBe("foreign_key_violation:purchase_items:purchase_items_product_id_fkey");
+    expect(
+      formatForeignKeyViolationError(
+        'violates foreign key constraint "stock_movements_inventory_item_id_fkey" on table "stock_movements"',
+      ),
+    ).toBe("foreign_key_violation:stock_movements:stock_movements_inventory_item_id_fkey");
   });
 
-  it("empties wipe-scope tables including purchase_items and stock_movements", () => {
+  it("empties wipe-scope tables including legacy FK blockers", () => {
     const initial = sampleDataset();
     const preservedBefore = { ...initial.preserved };
     const result = simulateOperationalReset(initial);
@@ -146,6 +181,9 @@ describe("operational hard reset contracts", () => {
 
     expect(result.final.wipe.stock_movements).toEqual([]);
     expect(result.final.wipe.purchase_items).toEqual([]);
+    expect(result.final.wipe.sale_items).toEqual([]);
+    expect(result.final.wipe.purchase_invoices).toEqual([]);
+    expect(result.final.wipe.weekly_log_product_lines).toEqual([]);
     expect(result.final.service_logs).toHaveLength(2);
     expect(result.final.service_logs.every((s) => s.product_usage.length === 0)).toBe(true);
     expect(result.final.service_logs.map((s) => s.revenue)).toEqual([5000, 2000]);
@@ -156,11 +194,16 @@ describe("operational hard reset contracts", () => {
       inventory_movements: 0,
       stock_movements: 0,
       inventory_correction_log: 0,
+      sale_items: 0,
       sales: 0,
       purchase_lines: 0,
       purchase_items: 0,
+      purchase_invoices: 0,
       purchases: 0,
       weekly_product_sales: 0,
+      weekly_log_product_lines: 0,
+      weekly_log_service_lines: 0,
+      weekly_logs: 0,
       inventory_import_batches: 0,
       inventory_items: 0,
       daily_cash_reconciliations: 0,
@@ -176,34 +219,37 @@ describe("operational hard reset contracts", () => {
     if (result.ok) return;
 
     expect(result.error).toBe("forced_test_failure");
-    // No partial wipe — snapshot restored
     expect(result.rolledBack.wipe.sales_edit_log).toEqual([1, 2]);
     expect(result.rolledBack.wipe.sales).toEqual([10, 11, 12]);
     expect(result.rolledBack.wipe.stock_movements).toEqual([1, 2]);
     expect(result.rolledBack.wipe.purchase_items).toEqual([1, 2, 3]);
+    expect(result.rolledBack.wipe.sale_items).toEqual([1]);
+    expect(result.rolledBack.wipe.purchase_invoices).toEqual([1]);
+    expect(result.rolledBack.wipe.weekly_logs).toEqual([1]);
     expect(result.rolledBack.wipe.inventory_items).toEqual([1, 2, 3]);
     expect(result.rolledBack.service_logs[0]?.product_usage).toHaveLength(1);
     expect(result.rolledBack.preserved).toEqual(initial.preserved);
   });
 
-  it("forced failure after purchase_items still restores stock_movements and purchase_items", () => {
+  it("forced failure after purchase_items still restores legacy child tables", () => {
     const initial = sampleDataset();
     const result = simulateOperationalReset(initial, { failAfterStep: "purchase_items" });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.rolledBack.wipe.purchase_items).toEqual([1, 2, 3]);
+    expect(result.rolledBack.wipe.purchase_invoices).toEqual([1]);
     expect(result.rolledBack.wipe.stock_movements).toEqual([1, 2]);
+    expect(result.rolledBack.wipe.sale_items).toEqual([1]);
     expect(result.rolledBack.wipe.inventory_items.length).toBe(3);
   });
 
-  it("forced failure after deeper step still restores full snapshot", () => {
+  it("forced failure after weekly_logs restores inventory_items and weekly logs", () => {
     const initial = sampleDataset();
-    const result = simulateOperationalReset(initial, { failAfterStep: "purchases" });
+    const result = simulateOperationalReset(initial, { failAfterStep: "weekly_logs" });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.rolledBack.wipe.purchases).toEqual([1]);
-    expect(result.rolledBack.wipe.purchase_items).toEqual([1, 2, 3]);
-    expect(result.rolledBack.wipe.stock_movements).toEqual([1, 2]);
+    expect(result.rolledBack.wipe.weekly_logs).toEqual([1]);
+    expect(result.rolledBack.wipe.weekly_log_product_lines).toEqual([1]);
     expect(result.rolledBack.wipe.inventory_items.length).toBe(3);
   });
 });

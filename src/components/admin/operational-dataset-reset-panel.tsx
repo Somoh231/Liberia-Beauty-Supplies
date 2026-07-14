@@ -24,14 +24,29 @@ function errMsg(code: string): string {
     backup_confirmation_required: "Confirm that a database backup / export has been taken.",
     forbidden_owner_required: "Only the business owner can run this reset.",
     migration_required:
-      "Database migration required. Apply 20260529120000_operational_hard_reset_fk_blockers.sql on Supabase.",
+      "Database migration required. Apply 20260530120000_operational_hard_reset_full_fk_audit.sql on Supabase.",
     preview_failed: "Could not load reset preview counts.",
     reauth_required: "Re-enter your password to authorize this reset.",
     reauth_failed: "Password verification failed.",
     reauth_expired: "Password confirmation expired. Re-authenticate and try again.",
+    preserved_data_changed: "Preserved data changed during reset (rolled back).",
+    reset_incomplete: "Wipe incomplete — some operational rows remained (rolled back).",
     reset_failed: "Reset failed and was rolled back.",
   };
-  return map[code] ?? code.replace(/_/g, " ");
+  if (map[code]) return map[code];
+  if (code.startsWith("preserved_data_changed")) {
+    return `Preserved data changed during reset (rolled back). ${code.replace(/^preserved_data_changed:?\s*/i, "")}`;
+  }
+  if (code.startsWith("reset_incomplete")) {
+    return `Wipe incomplete (rolled back). Remaining: ${code.replace(/^reset_incomplete:?\s*/i, "")}`;
+  }
+  if (code.startsWith("foreign_key_violation")) {
+    return `Foreign key blocked delete (rolled back): ${code}`;
+  }
+  if (code.startsWith("reset_failed:")) {
+    return `Reset failed and was rolled back. ${code.slice("reset_failed:".length).trim()}`;
+  }
+  return code.replace(/_/g, " ");
 }
 
 function WipeCountsList({ title, counts }: { title: string; counts: OperationalResetWipeCounts }) {
@@ -43,11 +58,16 @@ function WipeCountsList({ title, counts }: { title: string; counts: OperationalR
         <li>Inventory movements: {counts.inventory_movements}</li>
         <li>Stock movements: {counts.stock_movements ?? 0}</li>
         <li>Correction logs: {counts.inventory_correction_log}</li>
+        <li>Sale items: {counts.sale_items ?? 0}</li>
         <li>Sales: {counts.sales}</li>
         <li>Purchase lines: {counts.purchase_lines}</li>
         <li>Purchase items: {counts.purchase_items ?? 0}</li>
+        <li>Purchase invoices: {counts.purchase_invoices ?? 0}</li>
         <li>Purchases: {counts.purchases}</li>
         <li>Weekly product sales: {counts.weekly_product_sales}</li>
+        <li>Weekly log product lines: {counts.weekly_log_product_lines ?? 0}</li>
+        <li>Weekly log service lines: {counts.weekly_log_service_lines ?? 0}</li>
+        <li>Weekly logs: {counts.weekly_logs ?? 0}</li>
         <li>Import batches: {counts.inventory_import_batches}</li>
         <li>Inventory items: {counts.inventory_items}</li>
         <li>Daily reconciliations: {counts.daily_cash_reconciliations}</li>

@@ -3,7 +3,7 @@
 import { getAdminContext } from "@/lib/auth/admin-context";
 import { requireOwner } from "@/lib/auth/admin-guards";
 import type { SalonActionResult } from "@/lib/auth/salon-action-result";
-import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
+import { logSalonAdminSupabaseFailure, metaFromPostgrestError } from "@/lib/admin/admin-supabase-debug";
 import {
   OPERATIONAL_RESET_CONFIRM_PHRASE,
   isExactResetConfirmation,
@@ -24,6 +24,18 @@ function revalidateAfterReset() {
   revalidatePath("/admin/settings");
 }
 
+/** Always emit reset RPC failures (even when SALON_ADMIN_SUPABASE_DEBUG is off). */
+function logOperationalResetFailure(scope: string, err: unknown, meta?: Record<string, unknown>) {
+  const message = err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err);
+  console.error(`[salon-admin-supabase] ${scope}`, {
+    message,
+    ...meta,
+    ...metaFromPostgrestError(err),
+  });
+  // Also go through the gated logger when debug is enabled (includes stack).
+  logSalonAdminSupabaseFailure(scope, err, meta);
+}
+
 export async function previewOperationalResetAction(): Promise<
   SalonActionResult & { preview?: OperationalResetPreview }
 > {
@@ -35,7 +47,7 @@ export async function previewOperationalResetAction(): Promise<
   const { data, error } = await supabase.rpc("admin_preview_operational_reset");
 
   if (error) {
-    logSalonAdminSupabaseFailure("rpc:admin_preview_operational_reset", error, {
+    logOperationalResetFailure("rpc:admin_preview_operational_reset", error, {
       userId: ctx!.user.id,
       role: ctx!.salonRole,
     });
@@ -65,7 +77,7 @@ export async function reauthForOperationalResetAction(input: {
   const supabase = await createSupabaseServerClient();
   const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
   if (authError) {
-    logSalonAdminSupabaseFailure("auth:signInWithPassword:operational_reset_reauth", authError, {
+    logOperationalResetFailure("auth:signInWithPassword:operational_reset_reauth", authError, {
       userId: ctx!.user.id,
       role: ctx!.salonRole,
     });
@@ -80,7 +92,7 @@ export async function reauthForOperationalResetAction(input: {
 
   const { data: challengeId, error } = await supabase.rpc("admin_issue_operational_reset_reauth");
   if (error) {
-    logSalonAdminSupabaseFailure("rpc:admin_issue_operational_reset_reauth", error, {
+    logOperationalResetFailure("rpc:admin_issue_operational_reset_reauth", error, {
       userId: ctx!.user.id,
       role: ctx!.salonRole,
     });
@@ -124,11 +136,21 @@ export async function resetSalesAndInventoryAction(input: {
   });
 
   if (error) {
-    logSalonAdminSupabaseFailure("rpc:admin_reset_sales_and_inventory", error, {
+    logOperationalResetFailure("admin_reset_sales_and_inventory", error, {
       userId: ctx!.user.id,
       role: ctx!.salonRole,
+      supabaseCode: error.code,
+      supabaseMessage: error.message,
+      supabaseDetails: error.details,
+      supabaseHint: error.hint,
     });
-    return { ok: false, error: mapOperationalResetError(error.message ?? "", error.code) };
+    return {
+      ok: false,
+      error: mapOperationalResetError(
+        [error.message, error.details, error.hint].filter(Boolean).join(" | "),
+        error.code,
+      ),
+    };
   }
 
   revalidateAfterReset();

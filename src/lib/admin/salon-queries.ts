@@ -109,6 +109,8 @@ export type SaleRow = {
   gross_profit_usd_cents: number | null;
 };
 
+export type ServiceLogProductUsage = { inventory_item_id: string; qty: number };
+
 export type ServiceLogRow = {
   id: string;
   service_name: string;
@@ -122,10 +124,13 @@ export type ServiceLogRow = {
   customer_phone: string | null;
   customer_facebook: string | null;
   client_note: string | null;
+  product_usage?: ServiceLogProductUsage[] | null;
+  created_at?: string | null;
+  created_by?: string | null;
 };
 
 const SERVICE_LOG_SELECT =
-  "id,service_name,revenue_cents,currency,sold_at,staff_name,service_category,revenue_usd_equiv_cents,customer_name,customer_phone,customer_facebook,client_note";
+  "id,service_name,revenue_cents,currency,sold_at,staff_name,service_category,revenue_usd_equiv_cents,customer_name,customer_phone,customer_facebook,client_note,product_usage,created_at,created_by";
 
 export type PurchaseRow = {
   id: string;
@@ -508,6 +513,35 @@ export async function fetchServiceLogHistory(
   const { data, error } = await query;
   if (error) throw new Error(error.message);
   return (data ?? []) as ServiceLogRow[];
+}
+
+export async function fetchServiceLogsRecent(
+  supabase: SupabaseClient,
+  limit = 40,
+): Promise<ServiceLogRow[]> {
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - 90);
+  const { data, error } = await supabase
+    .from("service_logs")
+    .select(SERVICE_LOG_SELECT)
+    .gte("sold_at", since.toISOString())
+    .order("sold_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ServiceLogRow[];
+}
+
+export async function fetchServiceLogById(
+  supabase: SupabaseClient,
+  id: string,
+): Promise<ServiceLogRow | null> {
+  const { data, error } = await supabase
+    .from("service_logs")
+    .select(SERVICE_LOG_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as ServiceLogRow | null) ?? null;
 }
 
 export async function fetchSalesForItem(

@@ -6,10 +6,12 @@ import {
   fetchWeeklyReports,
   fetchSaleLogAnalytics,
   fetchRetailSalesRecent,
+  fetchServiceLogsRecent,
   fetchSpaceLeasePayments,
   type CurrencyTotals,
 } from "@/lib/admin/salon-queries";
 import { RecentRetailSalesPanel } from "@/components/admin/recent-retail-sales-panel";
+import { RecentServiceLogsPanel } from "@/components/admin/recent-service-logs-panel";
 import { SpaceLeasePanel } from "@/components/admin/space-lease-panel";
 import { formatSalonMoney } from "@/lib/admin/salon-format";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
@@ -63,10 +65,11 @@ export default async function AdminSalesLogIndexPage() {
   const staff = isSalonStaffRole(ctx.roleSlug);
   const supabase = await createSupabaseServerClient();
   const canManage = ctx.isManagerOrAbove;
-  const [reports, analytics, recentSales, spaceLeaseRows] = await Promise.all([
+  const [reports, analytics, recentSales, recentServices, spaceLeaseRows] = await Promise.all([
     fetchWeeklyReports(supabase),
     fetchSaleLogAnalytics(supabase),
     fetchRetailSalesRecent(supabase, 40),
+    fetchServiceLogsRecent(supabase, 40),
     fetchSpaceLeasePayments(supabase, 60),
   ]);
 
@@ -78,7 +81,8 @@ export default async function AdminSalesLogIndexPage() {
       <header className="space-y-2">
         <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold leading-tight text-white">Sale log</h1>
         <p className="max-w-2xl text-sm text-white/50">
-          Automatically aggregates daily retail sales from the Sale module and service revenue from the Service module.
+          Aggregates authoritative transactions: retail sales, service logs, and stylist fee / rental payments. Managers
+          can edit source records; archived weekly worksheets are view-only historical files.
         </p>
       </header>
 
@@ -146,6 +150,7 @@ export default async function AdminSalesLogIndexPage() {
       />
 
       <RecentRetailSalesPanel sales={recentSales} canEdit={canManage} />
+      <RecentServiceLogsPanel logs={recentServices} canEdit={canManage} />
 
       <section className="admin-card p-6">
         <h2 className="admin-eyebrow">Revenue trend (14 days, USD)</h2>
@@ -244,9 +249,10 @@ export default async function AdminSalesLogIndexPage() {
             </span>
           </summary>
           <p className="mt-3 text-xs text-white/40">
-            Historical week files only. Daily <strong className="text-white/60">Sale</strong> and{" "}
-            <strong className="text-white/60">Service</strong> entries above are the operational source of truth — new
-            worksheet lines no longer affect inventory.
+            Historical week files only — not authoritative editable transactions. Daily{" "}
+            <strong className="text-white/60">Retail</strong>, <strong className="text-white/60">Service</strong>, and{" "}
+            <strong className="text-white/60">Rental</strong> rows above are the operational source of truth. Do not edit
+            worksheet lines to correct live Sales Log totals.
           </p>
           <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-xs text-amber-100/80">
             Creating a new worksheet is for record-keeping only. Prefer Sale and Service for all new revenue and stock

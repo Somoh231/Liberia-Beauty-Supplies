@@ -14,7 +14,9 @@ export function RecentRetailSalesPanel({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Recent retail sales</h2>
-          <p className="mt-1 text-xs text-white/40">Last 90 days from the Sale module. {canEdit ? "Managers can edit posted sales." : ""}</p>
+          <p className="mt-1 text-xs text-white/40">
+            Source: sales · Retail sale. {canEdit ? "Managers can edit posted sales." : ""}
+          </p>
         </div>
         <Link
           href="/admin/sales/new"
@@ -26,6 +28,7 @@ export function RecentRetailSalesPanel({
       <table className="mt-4 w-full min-w-[640px] text-left text-sm">
         <thead>
           <tr className="border-b border-white/10 text-[10px] uppercase tracking-[0.12em] text-white/40">
+            <th className="py-2">Type</th>
             <th className="py-2">Date</th>
             <th className="py-2">Product</th>
             <th className="py-2">Qty</th>
@@ -39,6 +42,11 @@ export function RecentRetailSalesPanel({
             const rev = s.revenue_usd_equiv_cents ?? Math.round(s.qty * s.unit_price_cents);
             return (
               <tr key={s.id} className="border-b border-white/[0.06]">
+                <td className="py-2">
+                  <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-sky-100/85">
+                    Retail
+                  </span>
+                </td>
                 <td className="py-2 text-white/70">{s.sold_at.slice(0, 10)}</td>
                 <td className="py-2 text-white">
                   {s.product_name}
@@ -50,7 +58,7 @@ export function RecentRetailSalesPanel({
                 {canEdit ? (
                   <td className="py-2 text-right">
                     <Link
-                      href={`/admin/sales/${s.id}/edit`}
+                      href={`/admin/sales/${s.id}/edit?returnTo=${encodeURIComponent("/admin/sales-log")}`}
                       className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]"
                     >
                       Edit

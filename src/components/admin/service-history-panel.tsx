@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { ServiceLogRow } from "@/lib/admin/salon-queries";
 import { formatSalonMoney } from "@/lib/admin/salon-format";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -16,7 +17,13 @@ function customerLine(row: ServiceLogRow) {
   return parts.length ? parts.join(" · ") : null;
 }
 
-export function ServiceHistoryPanel({ initialRows }: { initialRows: ServiceLogRow[] }) {
+export function ServiceHistoryPanel({
+  initialRows,
+  canEdit = false,
+}: {
+  initialRows: ServiceLogRow[];
+  canEdit?: boolean;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, start] = useTransition();
@@ -80,12 +87,13 @@ export function ServiceHistoryPanel({ initialRows }: { initialRows: ServiceLogRo
               <th className="py-2 pr-2">Client</th>
               <th className="py-2 pr-2">Tech</th>
               <th className="py-2 text-right">Amount</th>
+              {canEdit ? <th className="py-2 text-right"> </th> : null}
             </tr>
           </thead>
           <tbody>
             {initialRows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-6 text-center text-white/40">
+                <td colSpan={canEdit ? 6 : 5} className="py-6 text-center text-white/40">
                   {searchParams.get("q") ? "No matches for this search." : "No service entries yet."}
                 </td>
               </tr>
@@ -102,6 +110,16 @@ export function ServiceHistoryPanel({ initialRows }: { initialRows: ServiceLogRo
                   <td className="py-2 text-right text-[var(--admin-accent)]">
                     {formatSalonMoney(row.revenue_cents, row.currency)}
                   </td>
+                  {canEdit ? (
+                    <td className="py-2 text-right">
+                      <Link
+                        href={`/admin/services/${row.id}/edit?returnTo=${encodeURIComponent("/admin/services/new")}`}
+                        className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]"
+                      >
+                        Edit
+                      </Link>
+                    </td>
+                  ) : null}
                 </tr>
               );
             })}

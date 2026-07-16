@@ -13,6 +13,7 @@ import {
 } from "@/lib/admin/inventory-admin-correction";
 import { inventoryCostingFromFormMajors, unitGrossProfitUsdCents } from "@/lib/admin/pricing-engine";
 import { mapInventorySaleGuardError } from "@/lib/admin/inventory-sellability";
+import { isValidCalendarDateYmd, mapServiceEditError } from "@/lib/admin/sales-log-edit";
 import { logSalonAdminSupabaseFailure } from "@/lib/admin/admin-supabase-debug";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -618,6 +619,81 @@ export async function createServiceLogAction(input: {
     return { ok: false, error: error.message };
   }
   revalidateSalon();
+  return { ok: true };
+}
+
+export async function editServiceLogAction(input: {
+  serviceLogId: string;
+  serviceName: string;
+  serviceCategory?: string | null;
+  revenue: string;
+  currency: SalonCurrency;
+  serviceDate: string;
+  staffName?: string | null;
+  clientNote?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerFacebook?: string | null;
+  productUsage: ProductUsageLine[];
+  editReason: string;
+}): Promise<SalonActionResult> {
+  if (!isUuid(input.serviceLogId)) return { ok: false, error: "invalid_id" };
+
+  const ctx = await getAdminContext();
+  const deny = requireManagerOrAbove(ctx);
+  if (deny) return deny;
+
+  const reason = input.editReason?.trim() ?? "";
+  if (reason.length < 3) return { ok: false, error: "edit_reason_required" };
+
+  const serviceName = input.serviceName?.trim() ?? "";
+  if (serviceName.length < 2) return { ok: false, error: "invalid_name" };
+
+  const rev = parseMoneyToCents(input.revenue);
+  if (rev == null || rev < 0) return { ok: false, error: "invalid_revenue" };
+
+  const d = input.serviceDate?.trim();
+  if (!d || !isValidCalendarDateYmd(d)) return { ok: false, error: "invalid_service_date" };
+
+  const cur = normalizeCurrency(input.currency);
+  const usage: ProductUsageLine[] = [];
+  for (const u of input.productUsage ?? []) {
+    if (!isUuid(u.inventory_item_id)) return { ok: false, error: "invalid_product_usage" };
+    if (!Number.isFinite(u.qty) || u.qty <= 0) return { ok: false, error: "invalid_product_usage" };
+    usage.push({ inventory_item_id: u.inventory_item_id, qty: u.qty });
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("admin_edit_service_log", {
+    p_payload: {
+      service_log_id: input.serviceLogId,
+      service_name: serviceName,
+      service_category: input.serviceCategory?.trim() || null,
+      revenue_cents: rev,
+      currency: cur,
+      service_date: d,
+      staff_name: input.staffName?.trim() || null,
+      client_note: input.clientNote?.trim() || null,
+      customer_name: input.customerName?.trim() || null,
+      customer_phone: input.customerPhone?.trim() || null,
+      customer_facebook: input.customerFacebook?.trim() || null,
+      product_usage: usage,
+      edit_reason: reason,
+    },
+  });
+
+  if (error) {
+    logSalonAdminSupabaseFailure("rpc:admin_edit_service_log", error, {
+      userId: ctx!.user.id,
+      role: ctx!.salonRole,
+      serviceLogId: input.serviceLogId,
+    });
+    return { ok: false, error: mapServiceEditError(error.message ?? "", error.code) };
+  }
+
+  revalidateSalon();
+  revalidatePath(`/admin/services/${input.serviceLogId}/edit`);
+  revalidatePath("/admin/services/new");
   return { ok: true };
 }
 

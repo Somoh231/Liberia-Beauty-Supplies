@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { SalonSaleEditForm } from "@/components/admin/salon-sale-edit-form";
+import { SalonServiceEditForm } from "@/components/admin/salon-service-edit-form";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchInventoryItem, fetchSellableInventoryProducts, fetchRetailSaleById } from "@/lib/admin/salon-queries";
+import { fetchInventoryProducts, fetchServiceLogById } from "@/lib/admin/salon-queries";
 import { requireAdminContext } from "@/lib/auth/admin-context";
 import { sanitizeAdminReturnTo } from "@/lib/admin/safe-admin-return-to";
 
@@ -16,10 +16,10 @@ type Props = {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  return { title: `Edit sale ${id.slice(0, 8)}…` };
+  return { title: `Edit service ${id.slice(0, 8)}…` };
 }
 
-export default async function AdminSaleEditPage({ params, searchParams }: Props) {
+export default async function AdminServiceEditPage({ params, searchParams }: Props) {
   const ctx = await requireAdminContext();
   if (!ctx.isManagerOrAbove) redirect("/admin/sales-log");
 
@@ -28,18 +28,12 @@ export default async function AdminSaleEditPage({ params, searchParams }: Props)
   const returnTo = sanitizeAdminReturnTo(sp.returnTo);
 
   const supabase = await createSupabaseServerClient();
-  const [sale, sellable] = await Promise.all([
-    fetchRetailSaleById(supabase, id),
-    fetchSellableInventoryProducts(supabase),
+  const [log, items] = await Promise.all([
+    fetchServiceLogById(supabase, id),
+    fetchInventoryProducts(supabase),
   ]);
 
-  if (!sale) notFound();
-
-  const saleLineItem = await fetchInventoryItem(supabase, sale.inventory_item_id);
-  const pickerItems =
-    saleLineItem && !sellable.some((i) => i.id === saleLineItem.id)
-      ? [saleLineItem, ...sellable]
-      : sellable;
+  if (!log) notFound();
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 pb-10">
@@ -47,13 +41,13 @@ export default async function AdminSaleEditPage({ params, searchParams }: Props)
         ← Sale log
       </Link>
       <header className="space-y-1">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Retail sale</p>
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">Edit retail sale</h1>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">Service transaction</p>
+        <h1 className="font-[family-name:var(--font-display)] text-3xl font-medium text-white">Edit service</h1>
         <p className="text-sm text-white/50">
-          {sale.product_name} · logged {new Date(sale.sold_at).toLocaleString()}
+          {log.service_name} · logged {new Date(log.sold_at).toLocaleString()}
         </p>
       </header>
-      <SalonSaleEditForm sale={sale} items={pickerItems} returnTo={returnTo} />
+      <SalonServiceEditForm log={log} items={items} returnTo={returnTo} />
     </div>
   );
 }

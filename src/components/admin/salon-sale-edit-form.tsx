@@ -3,6 +3,7 @@
 import { editRetailSaleAction } from "@/app/actions/admin-salon";
 import type { InventoryItemRow, RetailSaleListRow } from "@/lib/admin/salon-queries";
 import { normalizeCurrency } from "@/lib/admin/salon-format";
+import { sanitizeAdminReturnTo } from "@/lib/admin/safe-admin-return-to";
 import { InventoryProductTypeaheadSelect } from "@/components/admin/inventory-product-typeahead";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -37,11 +38,14 @@ function errMsg(code: string): string {
 export function SalonSaleEditForm({
   sale,
   items,
+  returnTo = "/admin/sales-log",
 }: {
   sale: RetailSaleListRow;
   items: InventoryItemRow[];
+  returnTo?: string;
 }) {
   const router = useRouter();
+  const safeReturnTo = sanitizeAdminReturnTo(returnTo);
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [itemId, setItemId] = useState(sale.inventory_item_id);
@@ -75,7 +79,7 @@ export function SalonSaleEditForm({
             setErr(errMsg(r.error));
             return;
           }
-          router.push("/admin/sales-log");
+          router.push(safeReturnTo);
           router.refresh();
         });
       }}

@@ -271,6 +271,17 @@ export default async function AdminDashboardPage() {
                 </span>
               </div>
               <span className="admin-stat-value text-[var(--admin-accent)]">{formatSalonMoney(grossProfit30d, "USD")}</span>
+              {rollup.totalsLast30.productMarginPct != null ? (
+                <p className="admin-stat-hint">
+                  Margin {rollup.totalsLast30.productMarginPct.toFixed(1)}%
+                  {rollup.totalsLast30.productMarginPartial ? " · partial" : ""}
+                </p>
+              ) : (
+                <p className="admin-stat-hint">Margin unavailable</p>
+              )}
+              {rollup.totalsLast30.productCostCoverageLabel ? (
+                <p className="mt-1 text-[10px] text-white/40">{rollup.totalsLast30.productCostCoverageLabel}</p>
+              ) : null}
             </div>
           </div>
 

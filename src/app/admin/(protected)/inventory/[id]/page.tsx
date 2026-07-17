@@ -281,18 +281,52 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
         <ul className="mt-4 space-y-2 text-sm">
           {(sales ?? []).length === 0 ? <li className="text-white/45">No sales logged for this SKU yet.</li> : null}
           {(sales ?? []).map((s: SaleRow) => {
-            const rev = Math.round(s.qty * s.unit_price_cents);
-            const gpUsd = s.gross_profit_usd_cents;
-            const gpLegacy = Math.round(s.qty * (s.unit_price_cents - s.unit_cost_cents));
+            const revNative = Math.round(s.qty * s.unit_price_cents);
+            const revUsd = s.revenue_usd_equiv_cents;
+            const costOk = s.unit_cost_cents != null && s.unit_cost_cents > 0;
+            const cogs =
+              costOk && s.unit_cost_cents != null ? Math.round(s.qty * s.unit_cost_cents) : null;
+            const gpUsd = costOk ? s.gross_profit_usd_cents : null;
+            const marginPct =
+              costOk && revUsd != null && revUsd > 0 && gpUsd != null ? (gpUsd / revUsd) * 100 : null;
+            const status = !costOk
+              ? "Cost missing"
+              : gpUsd == null
+                ? "Margin unavailable"
+                : gpUsd > 0
+                  ? "Profitable"
+                  : gpUsd < 0
+                    ? "Loss"
+                    : "Break-even";
             return (
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] py-2 text-white/75">
                 <span>
                   {s.qty} × {formatSalonMoney(s.unit_price_cents, s.currency)} · {new Date(s.sold_at).toLocaleString()}
                 </span>
                 <span className="flex flex-wrap items-center gap-3 text-white/55">
-                  <span>
-                    Rev {formatSalonMoney(rev, s.currency)}
-                    {gpUsd != null ? ` · GP ${formatSalonMoney(gpUsd, "USD")} USD` : ` · GP ${formatSalonMoney(gpLegacy, s.currency)}`}
+                  <span className="text-right text-[12px] leading-relaxed">
+                    Rev {formatSalonMoney(revNative, s.currency)}
+                    {revUsd != null ? ` (${formatSalonMoney(revUsd, "USD")})` : ""}
+                    {" · "}
+                    COGS {cogs != null ? formatSalonMoney(cogs, "USD") : "Not available"}
+                    {" · "}
+                    GP {gpUsd != null ? formatSalonMoney(gpUsd, "USD") : "Not available"}
+                    {" · "}
+                    {marginPct != null ? `${marginPct.toFixed(1)}%` : "Not available"}
+                    {" · "}
+                    <span
+                      className={
+                        status === "Profitable"
+                          ? "text-emerald-300/90"
+                          : status === "Loss"
+                            ? "text-red-300/90"
+                            : status === "Cost missing" || status === "Margin unavailable"
+                              ? "text-amber-200/90"
+                              : "text-white/70"
+                      }
+                    >
+                      {status}
+                    </span>
                   </span>
                   {!staff ? (
                     <Link

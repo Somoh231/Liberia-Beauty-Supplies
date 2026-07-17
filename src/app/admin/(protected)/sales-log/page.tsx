@@ -98,6 +98,9 @@ export default async function AdminSalesLogIndexPage() {
           <p className="admin-stat-label">Week · rental / space</p>
           <span className="admin-stat-value">{formatSalonMoney(analytics.weekRentalUsdCents, "USD")}</span>
           <p className="admin-stat-hint">Operating revenue — not retail gross profit</p>
+          {analytics.rentalUsdCoverage.week.coverageLabel ? (
+            <p className="mt-1 text-[10px] text-amber-200/80">{analytics.rentalUsdCoverage.week.coverageLabel}</p>
+          ) : null}
         </div>
         <PeriodNativeCard
           title="This month (USD equiv.)"
@@ -139,6 +142,9 @@ export default async function AdminSalesLogIndexPage() {
         <div className="admin-card p-6">
           <p className="admin-stat-label">Month · rental / space</p>
           <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(analytics.monthRentalUsdCents, "USD")}</p>
+          {analytics.rentalUsdCoverage.month.coverageLabel ? (
+            <p className="mt-1 text-[10px] text-amber-200/80">{analytics.rentalUsdCoverage.month.coverageLabel}</p>
+          ) : null}
         </div>
       </div>
 
@@ -147,6 +153,8 @@ export default async function AdminSalesLogIndexPage() {
         canManage={canManage}
         weekRentalUsdCents={analytics.weekRentalUsdCents}
         monthRentalUsdCents={analytics.monthRentalUsdCents}
+        weekConversionCoverageLabel={analytics.rentalUsdCoverage.week.coverageLabel}
+        monthConversionCoverageLabel={analytics.rentalUsdCoverage.month.coverageLabel}
       />
 
       <RecentRetailSalesPanel sales={recentSales} canEdit={canManage} />

@@ -6,7 +6,10 @@ import {
   logAdminQueryResult,
   logAdminQueryStart,
 } from "@/lib/admin/admin-query-debug";
-import { effectiveUnitCostUsdCents, inventoryValueUsdCents, lineRevenueUsdEquivCents, unitGrossMarginPct, resolveOperationalFxFromSettings } from "@/lib/admin/pricing-engine";
+import { inventoryValueUsdCents, lineRevenueUsdEquivCents, unitGrossMarginPct, resolveOperationalFxFromSettings } from "@/lib/admin/pricing-engine";
+import { aggregateGrossMargin, computeGrossMarginLine, formatCostCoverage } from "@/lib/admin/gross-margin";
+import { aggregateSpaceLeaseUsd } from "@/lib/admin/space-lease-currency";
+import { hasInventoryCostBasis } from "@/lib/admin/inventory-sellability";
 
 const SUPPLIER_SELECT_FULL =
   "id,name,contact_name,email,phone,country_origin,product_category,active";
@@ -99,7 +102,8 @@ export type SaleRow = {
   inventory_item_id: string;
   qty: number;
   unit_price_cents: number;
-  unit_cost_cents: number;
+  /** Sale-time USD unit cost; null = cost missing (never treat as zero for margin). */
+  unit_cost_cents: number | null;
   currency: SalonCurrency;
   sold_at: string;
   payment_method: string | null;
@@ -455,6 +459,8 @@ export type SpaceLeasePaymentRow = {
   week_end_date: string;
   amount_cents: number;
   currency: SalonCurrency;
+  amount_usd_equiv_cents: number | null;
+  fx_lrd_per_usd: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -466,12 +472,30 @@ export async function fetchSpaceLeasePayments(
 ): Promise<SpaceLeasePaymentRow[]> {
   const { data, error } = await supabase
     .from("space_lease_payments")
-    .select("id,stylist_name,week_start_date,week_end_date,amount_cents,currency,notes,created_at,updated_at")
+    .select(
+      "id,stylist_name,week_start_date,week_end_date,amount_cents,currency,amount_usd_equiv_cents,fx_lrd_per_usd,notes,created_at,updated_at",
+    )
     .order("week_start_date", { ascending: false })
     .limit(limit);
   if (error) {
     const pg = error as PostgrestError;
     if (pg.code === "42P01" || pg.message?.includes("space_lease_payments")) return [];
+    // Pre-migration schema: retry without new columns
+    if (pg.code === "42703" || pg.message?.includes("amount_usd_equiv") || pg.message?.includes("fx_lrd")) {
+      const legacy = await supabase
+        .from("space_lease_payments")
+        .select("id,stylist_name,week_start_date,week_end_date,amount_cents,currency,notes,created_at,updated_at")
+        .order("week_start_date", { ascending: false })
+        .limit(limit);
+      if (legacy.error) throw new Error(legacy.error.message);
+      return ((legacy.data ?? []) as Omit<SpaceLeasePaymentRow, "amount_usd_equiv_cents" | "fx_lrd_per_usd">[]).map(
+        (r) => ({
+          ...r,
+          amount_usd_equiv_cents: r.currency === "USD" ? r.amount_cents : null,
+          fx_lrd_per_usd: null,
+        }),
+      );
+    }
     throw new Error(error.message);
   }
   return (data ?? []) as SpaceLeasePaymentRow[];
@@ -653,7 +677,13 @@ export type DashboardRollup = {
   totalsLast30: {
     productRevenueUsd: number;
     serviceRevenueUsd: number;
+    /** Gross profit from cost-complete product lines only (partial when coverage incomplete). */
     productGrossProfitUsd: number;
+    productMarginPct: number | null;
+    productMarginPartial: boolean;
+    productCostLinesWithCost: number;
+    productCostLinesTotal: number;
+    productCostCoverageLabel: string | null;
   };
 };
 
@@ -681,8 +711,6 @@ export async function fetchDashboardRollup(supabase: SupabaseClient): Promise<Da
   const opFx = resolveOperationalFxFromSettings(settings);
   const costOpts = { operationalFx: opFx };
 
-  const itemById = Object.fromEntries(items.map((i) => [i.id, i]));
-
   const inventoryValueByCurrency = emptyBag();
   let inventoryValueUsdRollup = 0;
   for (const it of items) {
@@ -707,29 +735,47 @@ export async function fetchDashboardRollup(supabase: SupabaseClient): Promise<Da
     productRevenueUsd: 0,
     serviceRevenueUsd: 0,
     productGrossProfitUsd: 0,
+    productMarginPct: null as number | null,
+    productMarginPartial: false,
+    productCostLinesWithCost: 0,
+    productCostLinesTotal: 0,
+    productCostCoverageLabel: null as string | null,
   };
 
   const cutoff30 = new Date();
   cutoff30.setUTCDate(cutoff30.getUTCDate() - 30);
 
+  const marginLines30: ReturnType<typeof computeGrossMarginLine>[] = [];
+
   for (const s of sales) {
     const day = monroviaDayKeyFromIso(s.sold_at);
     const revUsd =
       s.revenue_usd_equiv_cents ?? lineRevenueUsdEquivCents(s.unit_price_cents, s.qty, s.currency, opFx);
-    const item = itemById[s.inventory_item_id];
-    let gpUsd = s.gross_profit_usd_cents;
-    if (gpUsd == null && item) {
-      gpUsd = Math.round(revUsd - s.qty * effectiveUnitCostUsdCents(item, costOpts));
-    } else if (gpUsd == null) {
-      gpUsd = 0;
-    }
+    // Prefer immutable sale-time cost snapshot — do not rewrite history with live WAC.
+    const line = computeGrossMarginLine({
+      revenueUsdCents: revUsd,
+      unitCostUsdCents: s.unit_cost_cents,
+      qty: s.qty,
+      grossProfitUsdCents: s.gross_profit_usd_cents,
+    });
     addDayUsd(productRevenueUsdByDay, day, revUsd);
-    addDayUsd(productGrossProfitUsdByDay, day, gpUsd);
+    if (line.costComplete && line.grossProfitUsdCents != null) {
+      addDayUsd(productGrossProfitUsdByDay, day, line.grossProfitUsdCents);
+    }
     if (new Date(s.sold_at) >= cutoff30) {
       totalsLast30.productRevenueUsd += revUsd;
-      totalsLast30.productGrossProfitUsd += gpUsd;
+      marginLines30.push(line);
     }
   }
+
+  const margin30 = aggregateGrossMargin(marginLines30);
+  totalsLast30.productGrossProfitUsd = margin30.grossProfitUsdCents ?? 0;
+  totalsLast30.productMarginPct = margin30.marginPct;
+  totalsLast30.productMarginPartial = margin30.isPartial;
+  totalsLast30.productCostLinesWithCost = margin30.linesWithCost;
+  totalsLast30.productCostLinesTotal = margin30.linesTotal;
+  totalsLast30.productCostCoverageLabel =
+    margin30.linesTotal > 0 ? formatCostCoverage(margin30) : null;
 
   for (const s of services) {
     const day = monroviaDayKeyFromIso(s.sold_at);
@@ -777,6 +823,13 @@ export type SaleLogAnalytics = {
   ytdServiceUsdCents: number;
   weekRentalUsdCents: number;
   monthRentalUsdCents: number;
+  /** YTD rental USD from known conversions only. */
+  ytdRentalUsdCents: number;
+  rentalUsdCoverage: {
+    week: { rowsTotal: number; rowsWithUsd: number; rowsConversionUnavailable: number; isPartial: boolean; coverageLabel: string | null };
+    month: { rowsTotal: number; rowsWithUsd: number; rowsConversionUnavailable: number; isPartial: boolean; coverageLabel: string | null };
+    ytd: { rowsTotal: number; rowsWithUsd: number; rowsConversionUnavailable: number; isPartial: boolean; coverageLabel: string | null };
+  };
   weekNative: { retail: CurrencyTotals; service: CurrencyTotals; rental: CurrencyTotals };
   monthNative: { retail: CurrencyTotals; service: CurrencyTotals; rental: CurrencyTotals };
   ytdNative: { retail: CurrencyTotals; service: CurrencyTotals; rental: CurrencyTotals };
@@ -909,14 +962,31 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
         .gte("sold_at", iso),
       supabase
         .from("space_lease_payments")
-        .select("amount_cents,currency,week_start_date")
+        .select("amount_cents,currency,week_start_date,amount_usd_equiv_cents,fx_lrd_per_usd")
         .gte("week_start_date", yearStartDate),
       fetchInventoryProducts(supabase, {}),
     ]);
   if (e1) throw new Error(e1.message);
   if (e2) throw new Error(e2.message);
-  if (e3 && (e3 as PostgrestError).code !== "42P01" && !e3.message?.includes("space_lease_payments")) {
-    throw new Error(e3.message);
+  let leaseData = leaseRows;
+  if (e3) {
+    const pg = e3 as PostgrestError;
+    if (pg.code === "42P01" || pg.message?.includes("space_lease_payments")) {
+      leaseData = [];
+    } else if (pg.code === "42703" || pg.message?.includes("amount_usd_equiv") || pg.message?.includes("fx_lrd")) {
+      const legacy = await supabase
+        .from("space_lease_payments")
+        .select("amount_cents,currency,week_start_date")
+        .gte("week_start_date", yearStartDate);
+      if (legacy.error) throw new Error(legacy.error.message);
+      leaseData = (legacy.data ?? []).map((r) => ({
+        ...r,
+        amount_usd_equiv_cents: (r as { currency: string }).currency === "USD" ? (r as { amount_cents: number }).amount_cents : null,
+        fx_lrd_per_usd: null,
+      }));
+    } else {
+      throw new Error(e3.message);
+    }
   }
 
   const nameById = Object.fromEntries(items.map((i) => [i.id, i.product_name]));
@@ -996,24 +1066,40 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
   let weekServiceUsdCents = 0;
   let monthRetailUsdCents = 0;
   let monthServiceUsdCents = 0;
-  let weekRentalUsdCents = 0;
-  let monthRentalUsdCents = 0;
 
-  type LeaseLite = { amount_cents: number; currency: SalonCurrency; week_start_date: string };
-  for (const p of (leaseRows ?? []) as LeaseLite[]) {
+  type LeaseLite = {
+    amount_cents: number;
+    currency: SalonCurrency;
+    week_start_date: string;
+    amount_usd_equiv_cents: number | null;
+    fx_lrd_per_usd: number | null;
+  };
+  const weekLeaseRows: LeaseLite[] = [];
+  const monthLeaseRows: LeaseLite[] = [];
+  const ytdLeaseRows: LeaseLite[] = [];
+
+  for (const p of (leaseData ?? []) as LeaseLite[]) {
     const cur = p.currency;
-    const revUsd = lineRevenueUsdEquivCents(p.amount_cents, 1, cur);
+    // Native detail always includes the row; USD totals use stored equiv only.
     addNative(ytdNative.rental, cur, p.amount_cents);
+    ytdLeaseRows.push(p);
     const t = new Date(`${p.week_start_date}T12:00:00.000Z`).getTime();
     if (t >= weekAgo) {
-      weekRentalUsdCents += revUsd;
       addNative(weekNative.rental, cur, p.amount_cents);
+      weekLeaseRows.push(p);
     }
     if (t >= monthAgo) {
-      monthRentalUsdCents += revUsd;
       addNative(monthNative.rental, cur, p.amount_cents);
+      monthLeaseRows.push(p);
     }
   }
+
+  const weekRentalCov = aggregateSpaceLeaseUsd(weekLeaseRows);
+  const monthRentalCov = aggregateSpaceLeaseUsd(monthLeaseRows);
+  const ytdRentalCov = aggregateSpaceLeaseUsd(ytdLeaseRows);
+  const weekRentalUsdCents = weekRentalCov.usdTotalCents;
+  const monthRentalUsdCents = monthRentalCov.usdTotalCents;
+  const ytdRentalUsdCents = ytdRentalCov.usdTotalCents;
 
   for (const s of sales) {
     const t = new Date(s.sold_at).getTime();
@@ -1097,6 +1183,30 @@ export async function fetchSaleLogAnalytics(supabase: SupabaseClient): Promise<S
     ytdServiceUsdCents,
     weekRentalUsdCents,
     monthRentalUsdCents,
+    ytdRentalUsdCents,
+    rentalUsdCoverage: {
+      week: {
+        rowsTotal: weekRentalCov.rowsTotal,
+        rowsWithUsd: weekRentalCov.rowsWithUsd,
+        rowsConversionUnavailable: weekRentalCov.rowsConversionUnavailable,
+        isPartial: weekRentalCov.isPartial,
+        coverageLabel: weekRentalCov.coverageLabel,
+      },
+      month: {
+        rowsTotal: monthRentalCov.rowsTotal,
+        rowsWithUsd: monthRentalCov.rowsWithUsd,
+        rowsConversionUnavailable: monthRentalCov.rowsConversionUnavailable,
+        isPartial: monthRentalCov.isPartial,
+        coverageLabel: monthRentalCov.coverageLabel,
+      },
+      ytd: {
+        rowsTotal: ytdRentalCov.rowsTotal,
+        rowsWithUsd: ytdRentalCov.rowsWithUsd,
+        rowsConversionUnavailable: ytdRentalCov.rowsConversionUnavailable,
+        isPartial: ytdRentalCov.isPartial,
+        coverageLabel: ytdRentalCov.coverageLabel,
+      },
+    },
     weekNative,
     monthNative,
     ytdNative,
@@ -1173,7 +1283,7 @@ export type TopMarginProduct = { id: string; name: string; marginPct: number; se
 export async function fetchTopMarginProducts(supabase: SupabaseClient, take = 5): Promise<TopMarginProduct[]> {
   const items = await fetchInventoryProducts(supabase, {});
   const ranked = items
-    .filter((i) => i.active && !i.deleted_at)
+    .filter((i) => i.active && !i.deleted_at && hasInventoryCostBasis(i))
     .map((i) => {
       const m = unitGrossMarginPct(i);
       return m == null

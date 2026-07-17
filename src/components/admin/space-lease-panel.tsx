@@ -6,13 +6,18 @@ import {
   updateSpaceLeasePaymentAction,
 } from "@/app/actions/admin-space-lease";
 import type { SpaceLeasePaymentRow } from "@/lib/admin/salon-queries";
-import { currencyShortLabel, formatSalonMoney, normalizeCurrency, type SalonCurrency } from "@/lib/admin/salon-format";
-import { lineRevenueUsdEquivCents } from "@/lib/admin/salon-finance";
+import { formatSalonMoney, type SalonCurrency } from "@/lib/admin/salon-format";
+import {
+  formatSpaceLeaseConversionUnavailable,
+  spaceLeaseUsdEquivCents,
+} from "@/lib/admin/space-lease-currency";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 const field =
   "mt-1 w-full min-h-[2.5rem] rounded-xl border border-white/12 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-white/35 focus:border-[var(--admin-accent)]/45 focus:outline-none focus:ring-1 focus:ring-[var(--admin-accent)]/30";
+
+type LeaseFormCurrency = Extract<SalonCurrency, "USD" | "LRD">;
 
 function currentWeekRange(): { start: string; end: string } {
   const d = new Date();
@@ -26,7 +31,23 @@ function currentWeekRange(): { start: string; end: string } {
 }
 
 function errMsg(code: string): string {
-  return code.replace(/_/g, " ");
+  const map: Record<string, string> = {
+    unsupported_currency: "Currency must be USD or LRD.",
+    invalid_currency: "Currency is required.",
+    invalid_amount: "Enter a valid amount greater than zero.",
+    invalid_fx_rate: "Operational LRD/USD rate is missing or invalid.",
+    migration_required: "Apply migration 20260607120000_space_lease_payment_currency_and_margin.sql on Supabase.",
+    invalid_stylist_name: "Stylist name is required.",
+    invalid_week_dates: "Enter valid week dates.",
+    invalid_week_range: "Week end must be on or after week start.",
+    unauthorized: "Only managers and owners can edit rental payments.",
+    forbidden_manager_required: "Only managers and owners can edit rental payments.",
+  };
+  return map[code] ?? code.replace(/_/g, " ");
+}
+
+function toFormCurrency(currency: string): LeaseFormCurrency {
+  return currency === "LRD" ? "LRD" : "USD";
 }
 
 export function SpaceLeasePanel({
@@ -34,11 +55,15 @@ export function SpaceLeasePanel({
   canManage,
   weekRentalUsdCents,
   monthRentalUsdCents,
+  weekConversionCoverageLabel = null,
+  monthConversionCoverageLabel = null,
 }: {
   rows: SpaceLeasePaymentRow[];
   canManage: boolean;
   weekRentalUsdCents: number;
   monthRentalUsdCents: number;
+  weekConversionCoverageLabel?: string | null;
+  monthConversionCoverageLabel?: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -49,7 +74,7 @@ export function SpaceLeasePanel({
   const [weekStart, setWeekStart] = useState(week.start);
   const [weekEnd, setWeekEnd] = useState(week.end);
   const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState<SalonCurrency>("USD");
+  const [currency, setCurrency] = useState<LeaseFormCurrency>("USD");
   const [notes, setNotes] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -70,7 +95,7 @@ export function SpaceLeasePanel({
     setWeekStart(row.week_start_date);
     setWeekEnd(row.week_end_date);
     setAmount((row.amount_cents / 100).toFixed(2));
-    setCurrency(row.currency);
+    setCurrency(toFormCurrency(row.currency));
     setNotes(row.notes ?? "");
   }
 
@@ -82,17 +107,23 @@ export function SpaceLeasePanel({
             Stylist fee / rental payments
           </h2>
           <p className="mt-1 max-w-2xl text-xs text-white/40">
-            Source: space_lease_payments · Stylist fee / rental payment. Booth and chair rent from stylists — operating
-            revenue, separate from retail and service totals. Edits update the existing payment (no duplicate).
+            Source: space_lease_payments · Stylist fee / rental payment. Enter USD or LRD; combined totals use the stored
+            USD equivalent. Conversion uses the operational LRD/USD rate saved with this payment.
           </p>
         </div>
         <div className="text-right text-xs text-white/50">
           <p>
-            This week: <span className="text-white">{formatSalonMoney(weekRentalUsdCents, "USD")}</span>
+            This week (USD equiv.): <span className="text-white">{formatSalonMoney(weekRentalUsdCents, "USD")}</span>
           </p>
+          {weekConversionCoverageLabel ? (
+            <p className="mt-0.5 text-[10px] text-amber-200/80">{weekConversionCoverageLabel}</p>
+          ) : null}
           <p>
-            This month: <span className="text-white">{formatSalonMoney(monthRentalUsdCents, "USD")}</span>
+            This month (USD equiv.): <span className="text-white">{formatSalonMoney(monthRentalUsdCents, "USD")}</span>
           </p>
+          {monthConversionCoverageLabel ? (
+            <p className="mt-0.5 text-[10px] text-amber-200/80">{monthConversionCoverageLabel}</p>
+          ) : null}
         </div>
       </div>
 
@@ -109,7 +140,7 @@ export function SpaceLeasePanel({
                 weekStartDate: weekStart,
                 weekEndDate: weekEnd,
                 amount,
-                currency: normalizeCurrency(currency),
+                currency,
                 notes: notes || null,
               };
               const r = editingId
@@ -149,10 +180,14 @@ export function SpaceLeasePanel({
             </label>
             <label className="block text-xs text-white/55">
               Currency
-              <select className={field} value={currency} onChange={(e) => setCurrency(normalizeCurrency(e.target.value))}>
-                <option value="USD">USD</option>
-                <option value="LRD">{currencyShortLabel("LRD")}</option>
-                <option value="NGN">NGN</option>
+              <select
+                className={field}
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value === "LRD" ? "LRD" : "USD")}
+                required
+              >
+                <option value="USD">USD — US Dollar</option>
+                <option value="LRD">LRD — Liberian Dollar</option>
               </select>
             </label>
             <label className="block text-xs text-white/55 sm:col-span-2">
@@ -184,20 +219,21 @@ export function SpaceLeasePanel({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-left text-sm">
+        <table className="w-full min-w-[640px] text-left text-sm">
           <thead>
             <tr className="border-b border-white/10 text-[10px] uppercase tracking-[0.12em] text-white/40">
               <th className="py-2">Type</th>
               <th className="py-2">Week</th>
               <th className="py-2">Stylist</th>
               <th className="py-2">Amount</th>
-              <th className="py-2 text-right">USD equiv.</th>
+              <th className="py-2">USD equiv.</th>
               {canManage ? <th className="py-2 text-right"> </th> : null}
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => {
-              const usd = lineRevenueUsdEquivCents(row.amount_cents, 1, row.currency);
+              const usd = spaceLeaseUsdEquivCents(row);
+              const showFx = row.currency === "LRD" && usd != null && row.fx_lrd_per_usd != null;
               return (
                 <tr key={row.id} className="border-b border-white/[0.06]">
                   <td className="py-2">
@@ -211,8 +247,28 @@ export function SpaceLeasePanel({
                     {row.week_end_date}
                   </td>
                   <td className="py-2 text-white">{row.stylist_name}</td>
-                  <td className="py-2 text-white/75">{formatSalonMoney(row.amount_cents, row.currency)}</td>
-                  <td className="py-2 text-right text-white/55">{formatSalonMoney(usd, "USD")}</td>
+                  <td className="py-2 text-white/75">
+                    <div>{formatSalonMoney(row.amount_cents, row.currency)}</div>
+                    {showFx ? (
+                      <div className="mt-0.5 text-[11px] text-white/45">
+                        Approx. {formatSalonMoney(usd, "USD")} at {Number(row.fx_lrd_per_usd)} LRD/USD
+                        <span className="block text-[10px] text-white/35">
+                          Conversion uses the operational LRD/USD rate saved with this payment.
+                        </span>
+                      </div>
+                    ) : null}
+                    {usd == null ? (
+                      <div className="mt-0.5 text-[11px] text-amber-200/85">
+                        {formatSpaceLeaseConversionUnavailable()}
+                        <span className="block text-[10px] text-white/35">
+                          No transaction-time FX snapshot — excluded from USD totals.
+                        </span>
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="py-2 text-white/55">
+                    {usd != null ? formatSalonMoney(usd, "USD") : formatSpaceLeaseConversionUnavailable()}
+                  </td>
                   {canManage ? (
                     <td className="py-2 text-right">
                       <button

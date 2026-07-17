@@ -6,6 +6,7 @@ import {
   complementaryRetailLabel,
   convertRetailUnitMajorOnCurrencySwitch,
   effectiveUnitCostUsdCents,
+  hasPositiveUnitCostUsd,
   saleLineFinancialPreview,
   unitGrossMarginPct,
   unitMarginPctAtRetailPriceMinor,
@@ -145,7 +146,9 @@ export function SalonRetailSaleBatchForm({
   const batchTotals = useMemo(() => {
     let revenueUsdCents = 0;
     let grossProfitUsdCents = 0;
+    let costCompleteRevenue = 0;
     let lines = 0;
+    let linesWithCost = 0;
     for (const row of rows) {
       const sel = itemById[row.inventoryItemId];
       if (!sel) continue;
@@ -153,7 +156,9 @@ export function SalonRetailSaleBatchForm({
       const qtyN = Number(String(row.qty).replace(/,/g, ""));
       if (uc == null || !Number.isFinite(qtyN) || qtyN <= 0) continue;
       const lineCurrency: "USD" | "LRD" = row.currency === "LRD" ? "LRD" : "USD";
-      const wac = effectiveUnitCostUsdCents(sel, { operationalFx });
+      const wac = hasPositiveUnitCostUsd(sel, { operationalFx })
+        ? effectiveUnitCostUsdCents(sel, { operationalFx })
+        : null;
       const p = saleLineFinancialPreview({
         qty: qtyN,
         unitPriceCents: uc,
@@ -162,11 +167,24 @@ export function SalonRetailSaleBatchForm({
         fx: operationalFx,
       });
       revenueUsdCents += p.revenueUsdCents;
-      grossProfitUsdCents += p.grossProfitUsdCents;
       lines += 1;
+      if (!p.costMissing && p.grossProfitUsdCents != null) {
+        grossProfitUsdCents += p.grossProfitUsdCents;
+        costCompleteRevenue += p.revenueUsdCents;
+        linesWithCost += 1;
+      }
     }
-    const marginPct = revenueUsdCents > 0 ? (grossProfitUsdCents / revenueUsdCents) * 100 : null;
-    return { revenueUsdCents, grossProfitUsdCents, marginPct, lines };
+    const marginPct =
+      costCompleteRevenue > 0 ? (grossProfitUsdCents / costCompleteRevenue) * 100 : null;
+    return {
+      revenueUsdCents,
+      grossProfitUsdCents,
+      marginPct,
+      lines,
+      linesWithCost,
+      costPartial: linesWithCost > 0 && linesWithCost < lines,
+      costMissingAll: lines > 0 && linesWithCost === 0,
+    };
   }, [rows, itemById, operationalFx]);
 
   return (
@@ -189,10 +207,12 @@ export function SalonRetailSaleBatchForm({
               qty: qtyN,
               unitPriceCents: uc,
               currency: lineCurrency,
-              wacUsdCentsPerUnit: effectiveUnitCostUsdCents(sel, { operationalFx }),
+              wacUsdCentsPerUnit: hasPositiveUnitCostUsd(sel, { operationalFx })
+                ? effectiveUnitCostUsdCents(sel, { operationalFx })
+                : null,
               fx: operationalFx,
             });
-            if (prev.grossProfitUsdCents < 0) {
+            if (prev.grossProfitUsdCents != null && prev.grossProfitUsdCents < 0) {
               loss = true;
               break;
             }
@@ -243,7 +263,10 @@ export function SalonRetailSaleBatchForm({
       <div className="space-y-4">
         {rows.map((row, idx) => {
           const sel = itemById[row.inventoryItemId];
-          const wac = sel ? effectiveUnitCostUsdCents(sel, { operationalFx }) : 0;
+          const wac =
+            sel && hasPositiveUnitCostUsd(sel, { operationalFx })
+              ? effectiveUnitCostUsdCents(sel, { operationalFx })
+              : null;
           const uc = parseMoneyToCents(row.unitPrice);
           const qtyN = Number(String(row.qty).replace(/,/g, ""));
           const lineCurrency: "USD" | "LRD" = row.currency === "LRD" ? "LRD" : "USD";
@@ -260,7 +283,7 @@ export function SalonRetailSaleBatchForm({
           const dual = row.unitPrice ? complementaryRetailLabel(row.unitPrice, lineCurrency, operationalFx) : null;
           const unitMargin = sel ? unitGrossMarginPct(sel, { operationalFx }) : null;
           const liveUnitMargin =
-            sel && uc != null && uc > 0
+            sel && uc != null && uc > 0 && wac != null
               ? unitMarginPctAtRetailPriceMinor(uc, lineCurrency, wac, operationalFx?.lrdPerUsd)
               : null;
           const locked = priceLocked(row, sel);
@@ -419,7 +442,7 @@ export function SalonRetailSaleBatchForm({
                 <div className="grid gap-2 border-t border-white/[0.06] pt-2 text-[11px] text-white/55 sm:grid-cols-2 lg:grid-cols-5">
                   <p>
                     <span className="text-white/35">Landed (WAC) $ · </span>
-                    <span className="text-white/85">{(wac / 100).toFixed(2)}</span>
+                    <span className="text-white/85">{wac != null ? (wac / 100).toFixed(2) : "Cost missing"}</span>
                   </p>
                   <p>
                     <span className="text-white/35">Retail $ · </span>
@@ -449,9 +472,11 @@ export function SalonRetailSaleBatchForm({
               {preview ? (
                 <div
                   className={`flex flex-wrap gap-x-4 gap-y-1 rounded-lg border px-3 py-2.5 text-[11px] text-white/80 ${
-                    preview.grossProfitUsdCents < 0
-                      ? "border-red-500/30 bg-red-500/[0.07]"
-                      : "border-[var(--admin-accent)]/20 bg-[var(--admin-accent)]/[0.06]"
+                    preview.costMissing
+                      ? "border-amber-500/30 bg-amber-500/[0.07]"
+                      : preview.grossProfitUsdCents != null && preview.grossProfitUsdCents < 0
+                        ? "border-red-500/30 bg-red-500/[0.07]"
+                        : "border-[var(--admin-accent)]/20 bg-[var(--admin-accent)]/[0.06]"
                   }`}
                 >
                   <span>
@@ -463,13 +488,29 @@ export function SalonRetailSaleBatchForm({
                   </span>
                   <span>
                     Gross profit:{" "}
-                    <strong className={preview.grossProfitUsdCents < 0 ? "text-red-200" : "text-[var(--admin-accent)]"}>
-                      {formatSalonMoney(preview.grossProfitUsdCents, "USD")}
+                    <strong
+                      className={
+                        preview.costMissing
+                          ? "text-amber-100"
+                          : preview.grossProfitUsdCents != null && preview.grossProfitUsdCents < 0
+                            ? "text-red-200"
+                            : "text-[var(--admin-accent)]"
+                      }
+                    >
+                      {preview.costMissing || preview.grossProfitUsdCents == null
+                        ? "Not available"
+                        : formatSalonMoney(preview.grossProfitUsdCents, "USD")}
                     </strong>
                   </span>
                   <span>
                     Margin:{" "}
-                    <strong className="text-white">{preview.marginPct != null ? `${preview.marginPct.toFixed(1)}%` : "—"}</strong>
+                    <strong className="text-white">
+                      {preview.costMissing
+                        ? "Cost missing"
+                        : preview.marginPct != null
+                          ? `${preview.marginPct.toFixed(1)}%`
+                          : "—"}
+                    </strong>
                   </span>
                 </div>
               ) : null}
@@ -501,11 +542,24 @@ export function SalonRetailSaleBatchForm({
             <span className="text-white/45">Batch ({batchTotals.lines} lines):</span>{" "}
             <span className="ml-1 text-white">Rev {formatSalonMoney(batchTotals.revenueUsdCents, "USD")}</span>
             <span className="mx-2 text-white/25">·</span>
-            <span className="text-[var(--admin-accent)]">GP {formatSalonMoney(batchTotals.grossProfitUsdCents, "USD")}</span>
+            <span className="text-[var(--admin-accent)]">
+              GP{" "}
+              {batchTotals.costMissingAll
+                ? "Not available"
+                : formatSalonMoney(batchTotals.grossProfitUsdCents, "USD")}
+            </span>
             {batchTotals.marginPct != null ? (
               <>
                 <span className="mx-2 text-white/25">·</span>
-                <span>{batchTotals.marginPct.toFixed(1)}% blend</span>
+                <span>
+                  {batchTotals.marginPct.toFixed(1)}%
+                  {batchTotals.costPartial ? " partial" : ""}
+                </span>
+              </>
+            ) : batchTotals.costMissingAll ? (
+              <>
+                <span className="mx-2 text-white/25">·</span>
+                <span className="text-amber-200/90">Cost missing</span>
               </>
             ) : null}
           </div>

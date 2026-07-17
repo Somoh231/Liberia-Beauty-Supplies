@@ -3,7 +3,10 @@
 import { getAdminContext } from "@/lib/auth/admin-context";
 import { requireManagerOrAbove } from "@/lib/auth/admin-guards";
 import type { SalonActionResult } from "@/lib/auth/salon-action-result";
-import { normalizeCurrency, parseMoneyToCents, type SalonCurrency } from "@/lib/admin/salon-format";
+import { parseMoneyToCents } from "@/lib/admin/salon-format";
+import { resolveOperationalFxFromSettings } from "@/lib/admin/pricing-engine";
+import { resolveSpaceLeaseCurrencyFields } from "@/lib/admin/space-lease-currency";
+import { fetchOperationalSettings } from "@/lib/admin/salon-queries";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
@@ -28,12 +31,30 @@ function parseWeekDates(start: string, end: string): { ok: true; start: string; 
   return { ok: true, start: s, end: e };
 }
 
+async function resolveLeaseMoney(
+  amount: string,
+  currency: string,
+): Promise<ReturnType<typeof resolveSpaceLeaseCurrencyFields>> {
+  const amountCents = parseMoneyToCents(amount);
+  if (amountCents == null) return { ok: false, error: "invalid_amount" };
+
+  const supabase = await createSupabaseServerClient();
+  const settings = await fetchOperationalSettings(supabase);
+  const fx = resolveOperationalFxFromSettings(settings);
+
+  return resolveSpaceLeaseCurrencyFields({
+    amountCents,
+    currency,
+    lrdPerUsd: fx.lrdPerUsd,
+  });
+}
+
 export async function createSpaceLeasePaymentAction(input: {
   stylistName: string;
   weekStartDate: string;
   weekEndDate: string;
   amount: string;
-  currency: SalonCurrency;
+  currency: string;
   notes?: string | null;
 }): Promise<SalonActionResult & { id?: string }> {
   const ctx = await getAdminContext();
@@ -46,8 +67,8 @@ export async function createSpaceLeasePaymentAction(input: {
   const dates = parseWeekDates(input.weekStartDate, input.weekEndDate);
   if (!dates.ok) return { ok: false, error: dates.error };
 
-  const amountCents = parseMoneyToCents(input.amount);
-  if (amountCents == null) return { ok: false, error: "invalid_amount" };
+  const money = await resolveLeaseMoney(input.amount, input.currency);
+  if (!money.ok) return { ok: false, error: money.error };
 
   const supabase = await createSupabaseServerClient();
   const {
@@ -60,8 +81,10 @@ export async function createSpaceLeasePaymentAction(input: {
       stylist_name: stylistName,
       week_start_date: dates.start,
       week_end_date: dates.end,
-      amount_cents: amountCents,
-      currency: normalizeCurrency(input.currency),
+      amount_cents: money.amountCents,
+      currency: money.currency,
+      amount_usd_equiv_cents: money.amountUsdEquivCents,
+      fx_lrd_per_usd: money.fxLrdPerUsd,
       notes: input.notes?.trim() || null,
       created_by: user?.id ?? null,
       updated_by: user?.id ?? null,
@@ -69,7 +92,17 @@ export async function createSpaceLeasePaymentAction(input: {
     .select("id")
     .maybeSingle();
 
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    const msg = (error.message ?? "").toLowerCase();
+    if (msg.includes("unsupported_currency")) return { ok: false, error: "unsupported_currency" };
+    if (msg.includes("invalid_fx_rate")) return { ok: false, error: "invalid_fx_rate" };
+    if (msg.includes("invalid_amount")) return { ok: false, error: "invalid_amount" };
+    if (msg.includes("invalid_currency")) return { ok: false, error: "invalid_currency" };
+    if (msg.includes("amount_usd_equiv") || msg.includes("fx_lrd_per_usd") || error.code === "PGRST204") {
+      return { ok: false, error: "migration_required" };
+    }
+    return { ok: false, error: error.message };
+  }
   revalidateSpaceLease();
   return { ok: true, id: (data as { id: string } | null)?.id };
 }
@@ -80,7 +113,7 @@ export async function updateSpaceLeasePaymentAction(input: {
   weekStartDate: string;
   weekEndDate: string;
   amount: string;
-  currency: SalonCurrency;
+  currency: string;
   notes?: string | null;
 }): Promise<SalonActionResult> {
   if (!isUuid(input.id)) return { ok: false, error: "invalid_id" };
@@ -94,8 +127,8 @@ export async function updateSpaceLeasePaymentAction(input: {
   const dates = parseWeekDates(input.weekStartDate, input.weekEndDate);
   if (!dates.ok) return { ok: false, error: dates.error };
 
-  const amountCents = parseMoneyToCents(input.amount);
-  if (amountCents == null) return { ok: false, error: "invalid_amount" };
+  const money = await resolveLeaseMoney(input.amount, input.currency);
+  if (!money.ok) return { ok: false, error: money.error };
 
   const supabase = await createSupabaseServerClient();
   const {
@@ -108,14 +141,25 @@ export async function updateSpaceLeasePaymentAction(input: {
       stylist_name: stylistName,
       week_start_date: dates.start,
       week_end_date: dates.end,
-      amount_cents: amountCents,
-      currency: normalizeCurrency(input.currency),
+      amount_cents: money.amountCents,
+      currency: money.currency,
+      amount_usd_equiv_cents: money.amountUsdEquivCents,
+      fx_lrd_per_usd: money.fxLrdPerUsd,
       notes: input.notes?.trim() || null,
       updated_by: user?.id ?? null,
     })
     .eq("id", input.id);
 
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    const msg = (error.message ?? "").toLowerCase();
+    if (msg.includes("unsupported_currency")) return { ok: false, error: "unsupported_currency" };
+    if (msg.includes("invalid_fx_rate")) return { ok: false, error: "invalid_fx_rate" };
+    if (msg.includes("invalid_amount")) return { ok: false, error: "invalid_amount" };
+    if (msg.includes("amount_usd_equiv") || msg.includes("fx_lrd_per_usd") || error.code === "PGRST204") {
+      return { ok: false, error: "migration_required" };
+    }
+    return { ok: false, error: error.message };
+  }
   revalidateSpaceLease();
   return { ok: true };
 }

@@ -212,10 +212,23 @@ export function inventoryValueUsdCents(item: InventoryCostingInput, opts?: Effec
   return Math.round(q * effectiveUnitCostUsdCents(item, opts));
 }
 
+/** True when item has a positive USD cost basis (WAC / supplier / landed). Missing ≠ zero. */
+export function hasPositiveUnitCostUsd(item: InventoryCostingInput, opts?: EffectiveCostOptions): boolean {
+  const wac = item.weighted_avg_landed_usd_cents;
+  if (wac != null && wac > 0) return true;
+  const landed = item.landed_usd_cents_per_unit ?? 0;
+  const avg = item.avg_unit_cost_cents;
+  if (avg != null && avg > 0) return true;
+  if (landed > 0) return true;
+  void opts;
+  return false;
+}
+
 /** Per-unit gross profit in USD cents (retail USD − landed WAC USD). Negative GP is preserved. */
 export function unitGrossProfitUsdCents(item: InventoryCostingInput, opts?: EffectiveCostOptions): number | null {
   const sell = item.sell_price_usd_cents;
   if (sell == null || sell <= 0) return null;
+  if (!hasPositiveUnitCostUsd(item, opts)) return null;
   const cost = effectiveUnitCostUsdCents(item, opts);
   return sell - cost;
 }
@@ -223,6 +236,7 @@ export function unitGrossProfitUsdCents(item: InventoryCostingInput, opts?: Effe
 export function unitGrossMarginPct(item: InventoryCostingInput, opts?: EffectiveCostOptions): number | null {
   const sell = item.sell_price_usd_cents;
   if (sell == null || sell <= 0) return null;
+  if (!hasPositiveUnitCostUsd(item, opts)) return null;
   const p = unitGrossProfitUsdCents(item, opts);
   if (p == null) return null;
   return (p / sell) * 100;
@@ -333,27 +347,38 @@ export function lineRevenueUsdEquivCents(
   return line;
 }
 
-/** Retail sale line preview (client or server). Negative GP preserved. */
+/** Retail sale line preview (client or server). Negative GP preserved. Missing WAC → no fake 100% margin. */
 export function saleLineFinancialPreview(input: {
   qty: number;
   unitPriceCents: number;
   currency: Extract<SalonCurrency, "USD" | "LRD">;
-  wacUsdCentsPerUnit: number;
+  wacUsdCentsPerUnit: number | null | undefined;
   fx?: OperationalFxRates;
 }): {
   revenueUsdCents: number;
-  grossProfitUsdCents: number;
+  grossProfitUsdCents: number | null;
   marginPct: number | null;
   totalNativeCents: number;
+  costMissing: boolean;
 } {
   const qty = Number.isFinite(input.qty) ? input.qty : 0;
   const unit = Number.isFinite(input.unitPriceCents) ? input.unitPriceCents : 0;
   const totalNativeCents = Math.round(qty * unit);
   const revenueUsdCents = lineRevenueUsdEquivCents(unit, qty, input.currency, input.fx);
-  const costUsdCents = Math.round(qty * input.wacUsdCentsPerUnit);
+  const wac = input.wacUsdCentsPerUnit;
+  if (wac == null || !Number.isFinite(wac) || wac <= 0) {
+    return {
+      revenueUsdCents,
+      grossProfitUsdCents: null,
+      marginPct: null,
+      totalNativeCents,
+      costMissing: true,
+    };
+  }
+  const costUsdCents = Math.round(qty * wac);
   const grossProfitUsdCents = revenueUsdCents - costUsdCents;
   const marginPct = revenueUsdCents > 0 ? (grossProfitUsdCents / revenueUsdCents) * 100 : null;
-  return { revenueUsdCents, grossProfitUsdCents, marginPct, totalNativeCents };
+  return { revenueUsdCents, grossProfitUsdCents, marginPct, totalNativeCents, costMissing: false };
 }
 
 /** Display helper: complementary currency line under retail input. */

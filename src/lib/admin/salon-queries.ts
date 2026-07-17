@@ -10,6 +10,17 @@ import { inventoryValueUsdCents, lineRevenueUsdEquivCents, unitGrossMarginPct, r
 import { aggregateGrossMargin, computeGrossMarginLine, formatCostCoverage } from "@/lib/admin/gross-margin";
 import { aggregateSpaceLeaseUsd } from "@/lib/admin/space-lease-currency";
 import { hasInventoryCostBasis } from "@/lib/admin/inventory-sellability";
+import {
+  salesLogSoldAtPredicates,
+  salesLogWeekStartPredicates,
+  type SalesLogDateBounds,
+} from "@/lib/admin/sales-log-filters";
+import { paginateUntilExhausted, type PaginatedRowsResult } from "@/lib/admin/sales-log-paginate";
+import type {
+  FilteredRetailLite,
+  FilteredServiceLite,
+} from "@/lib/admin/sales-log-filtered-totals";
+import type { SpaceLeaseUsdRow } from "@/lib/admin/space-lease-currency";
 
 const SUPPLIER_SELECT_FULL =
   "id,name,contact_name,email,phone,country_origin,product_category,active";
@@ -421,17 +432,24 @@ function mapRetailSaleRow(row: Record<string, unknown>): RetailSaleListRow {
 export async function fetchRetailSalesRecent(
   supabase: SupabaseClient,
   limit = 50,
+  bounds?: SalesLogDateBounds,
 ): Promise<RetailSaleListRow[]> {
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - 90);
-  const { data, error } = await supabase
+  let query = supabase
     .from("sales")
     .select(
       "id,inventory_item_id,qty,unit_price_cents,unit_cost_cents,currency,sold_at,payment_method,customer_name,notes,revenue_usd_equiv_cents,gross_profit_usd_cents,inventory_items(product_name,product_code)",
     )
-    .gte("sold_at", since.toISOString())
     .order("sold_at", { ascending: false })
     .limit(limit);
+
+  if (bounds?.kind === "bounded") {
+    const p = salesLogSoldAtPredicates(bounds);
+    if (p) query = query.gte("sold_at", p.gte).lt("sold_at", p.lt);
+  } else if (!bounds || bounds.kind === "all") {
+    // Unbounded "all" still caps via limit; no date predicate.
+  }
+
+  const { data, error } = await query;
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) => mapRetailSaleRow(row as Record<string, unknown>));
 }
@@ -469,24 +487,36 @@ export type SpaceLeasePaymentRow = {
 export async function fetchSpaceLeasePayments(
   supabase: SupabaseClient,
   limit = 80,
+  bounds?: SalesLogDateBounds,
 ): Promise<SpaceLeasePaymentRow[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from("space_lease_payments")
     .select(
       "id,stylist_name,week_start_date,week_end_date,amount_cents,currency,amount_usd_equiv_cents,fx_lrd_per_usd,notes,created_at,updated_at",
     )
     .order("week_start_date", { ascending: false })
     .limit(limit);
+  if (bounds?.kind === "bounded") {
+    const p = salesLogWeekStartPredicates(bounds);
+    if (p) query = query.gte("week_start_date", p.gte).lt("week_start_date", p.lt);
+  }
+
+  const { data, error } = await query;
   if (error) {
     const pg = error as PostgrestError;
     if (pg.code === "42P01" || pg.message?.includes("space_lease_payments")) return [];
     // Pre-migration schema: retry without new columns
     if (pg.code === "42703" || pg.message?.includes("amount_usd_equiv") || pg.message?.includes("fx_lrd")) {
-      const legacy = await supabase
+      let legacyQuery = supabase
         .from("space_lease_payments")
         .select("id,stylist_name,week_start_date,week_end_date,amount_cents,currency,notes,created_at,updated_at")
         .order("week_start_date", { ascending: false })
         .limit(limit);
+      if (bounds?.kind === "bounded") {
+        const p = salesLogWeekStartPredicates(bounds);
+        if (p) legacyQuery = legacyQuery.gte("week_start_date", p.gte).lt("week_start_date", p.lt);
+      }
+      const legacy = await legacyQuery;
       if (legacy.error) throw new Error(legacy.error.message);
       return ((legacy.data ?? []) as Omit<SpaceLeasePaymentRow, "amount_usd_equiv_cents" | "fx_lrd_per_usd">[]).map(
         (r) => ({
@@ -542,17 +572,111 @@ export async function fetchServiceLogHistory(
 export async function fetchServiceLogsRecent(
   supabase: SupabaseClient,
   limit = 40,
+  bounds?: SalesLogDateBounds,
 ): Promise<ServiceLogRow[]> {
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - 90);
-  const { data, error } = await supabase
+  let query = supabase
     .from("service_logs")
     .select(SERVICE_LOG_SELECT)
-    .gte("sold_at", since.toISOString())
     .order("sold_at", { ascending: false })
     .limit(limit);
+
+  if (bounds?.kind === "bounded") {
+    const p = salesLogSoldAtPredicates(bounds);
+    if (p) query = query.gte("sold_at", p.gte).lt("sold_at", p.lt);
+  }
+
+  const { data, error } = await query;
   if (error) throw new Error(error.message);
   return (data ?? []) as ServiceLogRow[];
+}
+
+/**
+ * Paginated fetch of all matching retail rows for filtered totals (lite columns).
+ * Display tables should keep using fetchRetailSalesRecent with an 80-row limit.
+ */
+export async function fetchAllRetailSalesForTotals(
+  supabase: SupabaseClient,
+  bounds?: SalesLogDateBounds,
+): Promise<PaginatedRowsResult<FilteredRetailLite>> {
+  return paginateUntilExhausted(async (from, to) => {
+    let query = supabase
+      .from("sales")
+      .select("qty,unit_price_cents,unit_cost_cents,currency,revenue_usd_equiv_cents,gross_profit_usd_cents")
+      .order("sold_at", { ascending: false })
+      .range(from, to);
+    if (bounds?.kind === "bounded") {
+      const p = salesLogSoldAtPredicates(bounds);
+      if (p) query = query.gte("sold_at", p.gte).lt("sold_at", p.lt);
+    }
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    return (data ?? []) as FilteredRetailLite[];
+  });
+}
+
+/** Paginated fetch of all matching service logs for filtered totals. */
+export async function fetchAllServiceLogsForTotals(
+  supabase: SupabaseClient,
+  bounds?: SalesLogDateBounds,
+): Promise<PaginatedRowsResult<FilteredServiceLite>> {
+  return paginateUntilExhausted(async (from, to) => {
+    let query = supabase
+      .from("service_logs")
+      .select("revenue_cents,currency,revenue_usd_equiv_cents")
+      .order("sold_at", { ascending: false })
+      .range(from, to);
+    if (bounds?.kind === "bounded") {
+      const p = salesLogSoldAtPredicates(bounds);
+      if (p) query = query.gte("sold_at", p.gte).lt("sold_at", p.lt);
+    }
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    return (data ?? []) as FilteredServiceLite[];
+  });
+}
+
+/** Paginated fetch of all matching stylist-fee rows for filtered totals. */
+export async function fetchAllSpaceLeasePaymentsForTotals(
+  supabase: SupabaseClient,
+  bounds?: SalesLogDateBounds,
+): Promise<PaginatedRowsResult<SpaceLeaseUsdRow>> {
+  return paginateUntilExhausted(async (from, to) => {
+    let query = supabase
+      .from("space_lease_payments")
+      .select("amount_cents,currency,amount_usd_equiv_cents,fx_lrd_per_usd")
+      .order("week_start_date", { ascending: false })
+      .range(from, to);
+    if (bounds?.kind === "bounded") {
+      const p = salesLogWeekStartPredicates(bounds);
+      if (p) query = query.gte("week_start_date", p.gte).lt("week_start_date", p.lt);
+    }
+    const { data, error } = await query;
+    if (error) {
+      const pg = error as PostgrestError;
+      if (pg.code === "42P01" || pg.message?.includes("space_lease_payments")) return [];
+      if (pg.code === "42703" || pg.message?.includes("amount_usd_equiv") || pg.message?.includes("fx_lrd")) {
+        let legacy = supabase
+          .from("space_lease_payments")
+          .select("amount_cents,currency")
+          .order("week_start_date", { ascending: false })
+          .range(from, to);
+        if (bounds?.kind === "bounded") {
+          const p = salesLogWeekStartPredicates(bounds);
+          if (p) legacy = legacy.gte("week_start_date", p.gte).lt("week_start_date", p.lt);
+        }
+        const retry = await legacy;
+        if (retry.error) throw new Error(retry.error.message);
+        return ((retry.data ?? []) as { amount_cents: number; currency: string }[]).map((r) => ({
+          amount_cents: r.amount_cents,
+          currency: r.currency,
+          amount_usd_equiv_cents: r.currency === "USD" ? r.amount_cents : null,
+          fx_lrd_per_usd: null,
+        }));
+      }
+      throw new Error(error.message);
+    }
+    return (data ?? []) as SpaceLeaseUsdRow[];
+  });
 }
 
 export async function fetchServiceLogById(

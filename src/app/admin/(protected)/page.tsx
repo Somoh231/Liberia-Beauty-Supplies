@@ -10,12 +10,14 @@ import {
   fetchDashboardTrustSignals,
   fetchInventorySetupProgress,
 } from "@/lib/admin/salon-queries";
-import { formatSalonMoney } from "@/lib/admin/salon-format";
+import { formatSalonMoney, getMonroviaDayKey } from "@/lib/admin/salon-format";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
 import Link from "next/link";
 import { Boxes, TrendingUp, AlertTriangle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdminDashboardCharts } from "@/components/admin/admin-dashboard-charts";
+import { DashboardDrilldownCard } from "@/components/admin/dashboard-drilldown-card";
+import { buildSalesLogHref, monroviaLastNDaysInclusive } from "@/lib/admin/sales-log-filters";
 
 function buildRevenueTrendSeries(
   product: Record<string, number>,
@@ -83,7 +85,8 @@ export default async function AdminDashboardPage() {
 
   const monthCombined =
     (rollup?.totalsLast30.productRevenueUsd ?? 0) + (rollup?.totalsLast30.serviceRevenueUsd ?? 0);
-  const y0 = new Date().getFullYear();
+  const monroviaToday = getMonroviaDayKey();
+  const y0 = monroviaToday.slice(0, 4);
   const ytdCombined = rollup
     ? Object.keys(rollup.productRevenueUsdByDay)
         .filter((d) => d.startsWith(`${y0}-`))
@@ -93,6 +96,31 @@ export default async function AdminDashboardPage() {
         .reduce((a, d) => a + (rollup!.serviceRevenueUsdByDay[d] ?? 0), 0)
     : 0;
   const grossProfit30d = rollup?.totalsLast30.productGrossProfitUsd ?? 0;
+
+  const last30 = monroviaLastNDaysInclusive(30);
+  const hrefLast30 = buildSalesLogHref({ range: "custom", from: last30.from, to: last30.to });
+  const hrefLast30Retail = buildSalesLogHref({
+    range: "custom",
+    from: last30.from,
+    to: last30.to,
+    source: "retail",
+  });
+  const hrefToday = buildSalesLogHref({ range: "today" });
+  const hrefTodayRetail = buildSalesLogHref({ range: "today", source: "retail" });
+  const hrefTodayServices = buildSalesLogHref({ range: "today", source: "services" });
+  const href7dStylist = buildSalesLogHref({ range: "7d", source: "stylist-fees" });
+  // Analytics "month rental" is rolling ~30d — match KPI boundaries, not calendar month.
+  const hrefMonthStylist = buildSalesLogHref({
+    range: "custom",
+    from: last30.from,
+    to: last30.to,
+    source: "stylist-fees",
+  });
+  const hrefYtd = buildSalesLogHref({
+    range: "custom",
+    from: `${y0}-01-01`,
+    to: monroviaToday,
+  });
 
   const chartPayload =
     rollup && saleLogAnalytics
@@ -209,8 +237,8 @@ export default async function AdminDashboardPage() {
             <section className="admin-card border-amber-500/25 bg-amber-500/[0.06] p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-100/80">Stock alerts</h2>
-                <Link href="/admin/inventory?status=low_stock" className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]">
-                  View all →
+                <Link href="/admin/inventory" className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]">
+                  View inventory →
                 </Link>
               </div>
               <ul className="mt-3 space-y-2">
@@ -236,7 +264,7 @@ export default async function AdminDashboardPage() {
           ) : null}
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="admin-card p-6">
+            <DashboardDrilldownCard href="/admin/inventory" label="View inventory value details">
               <div className="flex items-start justify-between gap-3">
                 <p className="admin-stat-label">Inventory value</p>
                 <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--admin-accent-soft)] text-[var(--admin-pink)]">
@@ -244,8 +272,8 @@ export default async function AdminDashboardPage() {
                 </span>
               </div>
               <span className="admin-stat-value">{formatSalonMoney(rollup.inventoryValueUsdCents, "USD")}</span>
-            </div>
-            <div className="admin-card p-6">
+            </DashboardDrilldownCard>
+            <DashboardDrilldownCard href="/admin/inventory" label="View low stock inventory">
               <div className="flex items-start justify-between gap-3">
                 <p className="admin-stat-label">Low stock</p>
                 <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-500/12 text-amber-300">
@@ -253,8 +281,8 @@ export default async function AdminDashboardPage() {
                 </span>
               </div>
               <span className="admin-stat-value">{rollup.lowStockCount}</span>
-            </div>
-            <div className="admin-card p-6">
+            </DashboardDrilldownCard>
+            <DashboardDrilldownCard href="/admin/inventory" label="View out of stock inventory">
               <div className="flex items-start justify-between gap-3">
                 <p className="admin-stat-label">Out of stock</p>
                 <span className="grid h-9 w-9 place-items-center rounded-xl bg-red-500/12 text-red-300">
@@ -262,8 +290,11 @@ export default async function AdminDashboardPage() {
                 </span>
               </div>
               <span className="admin-stat-value">{rollup.outOfStockCount}</span>
-            </div>
-            <div className="admin-card p-6">
+            </DashboardDrilldownCard>
+            <DashboardDrilldownCard
+              href={hrefLast30Retail}
+              label="View retail gross profit for the last 30 days on the Sales Log"
+            >
               <div className="flex items-start justify-between gap-3">
                 <p className="admin-stat-label">Gross profit (30d)</p>
                 <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--admin-accent-soft)] text-[var(--admin-gold)]">
@@ -282,32 +313,57 @@ export default async function AdminDashboardPage() {
               {rollup.totalsLast30.productCostCoverageLabel ? (
                 <p className="mt-1 text-[10px] text-white/40">{rollup.totalsLast30.productCostCoverageLabel}</p>
               ) : null}
-            </div>
+            </DashboardDrilldownCard>
           </div>
 
           {chartPayload ? <AdminDashboardCharts data={chartPayload} /> : null}
 
           {saleLogAnalytics ? (
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="admin-card p-6">
+              <DashboardDrilldownCard
+                href={href7dStylist}
+                label="View stylist fee payments for the last 7 days"
+              >
                 <p className="admin-stat-label">Weekly rental income</p>
                 <span className="admin-stat-value">{formatSalonMoney(saleLogAnalytics.weekRentalUsdCents, "USD")}</span>
                 <p className="admin-stat-hint">Space lease — operating revenue</p>
-              </div>
-              <div className="admin-card p-6">
+                {saleLogAnalytics.rentalUsdCoverage.week.coverageLabel ? (
+                  <p className="mt-1 text-[10px] text-amber-200/80">
+                    {saleLogAnalytics.rentalUsdCoverage.week.coverageLabel}
+                  </p>
+                ) : null}
+              </DashboardDrilldownCard>
+              <DashboardDrilldownCard
+                href={hrefMonthStylist}
+                label="View stylist fee payments for this calendar month"
+              >
                 <p className="admin-stat-label">Month rental income</p>
                 <span className="admin-stat-value">{formatSalonMoney(saleLogAnalytics.monthRentalUsdCents, "USD")}</span>
-                <Link href="/admin/sales-log" className="mt-2 inline-block text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]">
-                  Sale log →
-                </Link>
-              </div>
+                {saleLogAnalytics.rentalUsdCoverage.month.coverageLabel ? (
+                  <p className="mt-1 text-[10px] text-amber-200/80">
+                    {saleLogAnalytics.rentalUsdCoverage.month.coverageLabel}
+                  </p>
+                ) : null}
+              </DashboardDrilldownCard>
             </div>
           ) : null}
 
           <section className="admin-card p-6">
-            <h2 className="admin-eyebrow">Today&apos;s revenue</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="admin-eyebrow">Today&apos;s revenue</h2>
+              <Link
+                href={hrefToday}
+                className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--admin-accent)]"
+              >
+                Open today on Sales Log →
+              </Link>
+            </div>
             <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
+              <Link
+                href={hrefTodayRetail}
+                aria-label="View today's retail sales on the Sales Log"
+                className="rounded-xl p-2 -m-2 transition hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--admin-accent)]"
+              >
                 <p className="text-xs text-white/45">Retail (USD equiv.)</p>
                 <p className="mt-1 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(today.retailUsdCents, "USD")}</p>
                 {today.retailNative.USD > 0 || today.retailNative.LRD > 0 ? (
@@ -317,8 +373,12 @@ export default async function AdminDashboardPage() {
                     {today.retailNative.LRD > 0 ? formatSalonMoney(today.retailNative.LRD, "LRD") : null}
                   </p>
                 ) : null}
-              </div>
-              <div>
+              </Link>
+              <Link
+                href={hrefTodayServices}
+                aria-label="View today's service revenue on the Sales Log"
+                className="rounded-xl p-2 -m-2 transition hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--admin-accent)]"
+              >
                 <p className="text-xs text-white/45">Services (USD equiv.)</p>
                 <p className="mt-1 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(today.serviceUsdCents, "USD")}</p>
                 {today.serviceNative.USD > 0 || today.serviceNative.LRD > 0 ? (
@@ -328,21 +388,38 @@ export default async function AdminDashboardPage() {
                     {today.serviceNative.LRD > 0 ? formatSalonMoney(today.serviceNative.LRD, "LRD") : null}
                   </p>
                 ) : null}
-              </div>
-              <div>
+              </Link>
+              <Link
+                href={hrefLast30}
+                aria-label="View last 30 days revenue on the Sales Log"
+                className="rounded-xl p-2 -m-2 transition hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--admin-accent)]"
+              >
                 <p className="text-xs text-white/45">Month (USD equiv.)</p>
                 <p className="mt-1 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(monthCombined, "USD")}</p>
-              </div>
-              <div>
+                <p className="mt-1 text-[10px] text-white/35">Last 30 days (matches KPI)</p>
+              </Link>
+              <Link
+                href={hrefYtd}
+                aria-label="View year-to-date revenue on the Sales Log"
+                className="rounded-xl p-2 -m-2 transition hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--admin-accent)]"
+              >
                 <p className="text-xs text-white/45">YTD (USD equiv.)</p>
                 <p className="mt-1 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(ytdCombined, "USD")}</p>
-              </div>
+              </Link>
             </div>
           </section>
 
           <div className="grid gap-6 lg:grid-cols-2">
             <section className="admin-card p-6">
-              <h2 className="admin-eyebrow">Best-selling products (YTD)</h2>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="admin-eyebrow">Best-selling products (YTD)</h2>
+                <Link
+                  href={buildSalesLogHref({ range: "custom", from: `${y0}-01-01`, to: monroviaToday, source: "retail" })}
+                  className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]"
+                >
+                  Retail log →
+                </Link>
+              </div>
               <ul className="mt-4 space-y-2 text-sm">
                 {topProducts.length === 0 ? <li className="text-white/40">No retail sales yet.</li> : null}
                 {topProducts.map((p) => (
@@ -357,7 +434,20 @@ export default async function AdminDashboardPage() {
             </section>
 
             <section className="admin-card p-6">
-              <h2 className="admin-eyebrow">Top services (YTD)</h2>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="admin-eyebrow">Top services (YTD)</h2>
+                <Link
+                  href={buildSalesLogHref({
+                    range: "custom",
+                    from: `${y0}-01-01`,
+                    to: monroviaToday,
+                    source: "services",
+                  })}
+                  className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]"
+                >
+                  Services log →
+                </Link>
+              </div>
               <ul className="mt-4 space-y-2 text-sm">
                 {topServices.length === 0 ? <li className="text-white/40">No service entries yet.</li> : null}
                 {topServices.map((s) => (
@@ -416,7 +506,7 @@ export default async function AdminDashboardPage() {
               Service
             </Link>
             <Link
-              href="/admin/sales-log"
+              href={buildSalesLogHref({ range: "month" })}
               className="admin-btn-secondary inline-flex min-h-[2.75rem] items-center rounded-full px-5 text-[10px] font-semibold uppercase tracking-[0.14em]"
             >
               Sale log

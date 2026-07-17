@@ -1,252 +1,254 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { NewWeeklySalesReportForm } from "@/components/admin/weekly-sales-log-new-form";
+import { SalesLogFilterBar } from "@/components/admin/sales-log-filter-bar";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   fetchWeeklyReports,
-  fetchSaleLogAnalytics,
   fetchRetailSalesRecent,
   fetchServiceLogsRecent,
   fetchSpaceLeasePayments,
-  type CurrencyTotals,
+  fetchAllRetailSalesForTotals,
+  fetchAllServiceLogsForTotals,
+  fetchAllSpaceLeasePaymentsForTotals,
 } from "@/lib/admin/salon-queries";
 import { RecentRetailSalesPanel } from "@/components/admin/recent-retail-sales-panel";
 import { RecentServiceLogsPanel } from "@/components/admin/recent-service-logs-panel";
 import { SpaceLeasePanel } from "@/components/admin/space-lease-panel";
 import { formatSalonMoney } from "@/lib/admin/salon-format";
 import { requireAdminContext, isSalonStaffRole } from "@/lib/auth/admin-context";
+import {
+  buildSalesLogHref,
+  parseSalesLogSearchParams,
+  salesLogRangeLabel,
+  SALES_LOG_BUSINESS_TIMEZONE,
+} from "@/lib/admin/sales-log-filters";
+import {
+  filteredSalesLogHasRows,
+  summarizeFilteredSalesLog,
+} from "@/lib/admin/sales-log-filtered-totals";
 
 export const metadata: Metadata = { title: "Sale Log" };
 export const dynamic = "force-dynamic";
 
-function nativeLines(retail: CurrencyTotals, service: CurrencyTotals) {
-  const parts: string[] = [];
-  const rTotal = retail.USD + retail.LRD;
-  const sTotal = service.USD + service.LRD;
-  if (rTotal > 0) {
-    const r: string[] = [];
-    if (retail.USD > 0) r.push(`Retail ${formatSalonMoney(retail.USD, "USD")}`);
-    if (retail.LRD > 0) r.push(formatSalonMoney(retail.LRD, "LRD"));
-    parts.push(r.join(" · "));
-  }
-  if (sTotal > 0) {
-    const s: string[] = [];
-    if (service.USD > 0) s.push(`Services ${formatSalonMoney(service.USD, "USD")}`);
-    if (service.LRD > 0) s.push(formatSalonMoney(service.LRD, "LRD"));
-    parts.push(s.join(" · "));
-  }
-  return parts.length ? parts.join(" / ") : "—";
-}
+const DISPLAY_RETAIL_LIMIT = 80;
+const DISPLAY_SERVICE_LIMIT = 80;
+const DISPLAY_LEASE_LIMIT = 80;
 
-function PeriodNativeCard({
-  title,
-  retailUsd,
-  serviceUsd,
-  retailNative,
-  serviceNative,
+type Search = Record<string, string | string[] | undefined>;
+
+export default async function AdminSalesLogIndexPage({
+  searchParams,
 }: {
-  title: string;
-  retailUsd: number;
-  serviceUsd: number;
-  retailNative: CurrencyTotals;
-  serviceNative: CurrencyTotals;
+  searchParams: Promise<Search>;
 }) {
-  return (
-    <div className="admin-card p-6">
-      <p className="admin-stat-label">{title}</p>
-      <span className="admin-stat-value">{formatSalonMoney(retailUsd + serviceUsd, "USD")}</span>
-      <p className="admin-stat-hint leading-relaxed">{nativeLines(retailNative, serviceNative)}</p>
-    </div>
-  );
-}
-
-export default async function AdminSalesLogIndexPage() {
   const ctx = await requireAdminContext();
   const staff = isSalonStaffRole(ctx.roleSlug);
   const supabase = await createSupabaseServerClient();
   const canManage = ctx.isManagerOrAbove;
-  const [reports, analytics, recentSales, recentServices, spaceLeaseRows] = await Promise.all([
-    fetchWeeklyReports(supabase),
-    fetchSaleLogAnalytics(supabase),
-    fetchRetailSalesRecent(supabase, 40),
-    fetchServiceLogsRecent(supabase, 40),
-    fetchSpaceLeasePayments(supabase, 60),
-  ]);
+  const sp = await searchParams;
+  const filter = parseSalesLogSearchParams(sp);
+  const returnTo = buildSalesLogHref({
+    range: filter.range,
+    source: filter.source,
+    from: filter.from,
+    to: filter.to,
+  });
 
-  const trend = analytics.dailyUsd.slice(-14);
-  const maxBar = Math.max(1, ...trend.map((d) => d.combinedUsdCents));
+  const showRetail = filter.source === "all" || filter.source === "retail";
+  const showServices = filter.source === "all" || filter.source === "services";
+  const showStylistFees = filter.source === "all" || filter.source === "stylist-fees";
+
+  const emptyAgg = { rows: [], incomplete: false as const };
+
+  const [reports, retailDisplay, serviceDisplay, leaseDisplay, retailAgg, serviceAgg, leaseAgg] =
+    await Promise.all([
+      fetchWeeklyReports(supabase),
+      showRetail ? fetchRetailSalesRecent(supabase, DISPLAY_RETAIL_LIMIT, filter.bounds) : Promise.resolve([]),
+      showServices ? fetchServiceLogsRecent(supabase, DISPLAY_SERVICE_LIMIT, filter.bounds) : Promise.resolve([]),
+      showStylistFees ? fetchSpaceLeasePayments(supabase, DISPLAY_LEASE_LIMIT, filter.bounds) : Promise.resolve([]),
+      showRetail ? fetchAllRetailSalesForTotals(supabase, filter.bounds) : Promise.resolve(emptyAgg),
+      showServices ? fetchAllServiceLogsForTotals(supabase, filter.bounds) : Promise.resolve(emptyAgg),
+      showStylistFees ? fetchAllSpaceLeasePaymentsForTotals(supabase, filter.bounds) : Promise.resolve(emptyAgg),
+    ]);
+
+  const totalsIncomplete = retailAgg.incomplete || serviceAgg.incomplete || leaseAgg.incomplete;
+  const totals = summarizeFilteredSalesLog({
+    retail: retailAgg.rows,
+    services: serviceAgg.rows,
+    rentals: leaseAgg.rows,
+    source: filter.source,
+  });
+  const hasRows = filteredSalesLogHasRows(totals, filter.source);
+  const rangeLabel = salesLogRangeLabel(filter);
 
   return (
     <div className="space-y-8 pb-4">
       <header className="space-y-2">
-        <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold leading-tight text-white">Sale log</h1>
+        <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold leading-tight text-white">
+          Sale log
+        </h1>
         <p className="max-w-2xl text-sm text-white/50">
-          Aggregates authoritative transactions: retail sales, service logs, and stylist fee / rental payments. Managers
-          can edit source records; archived weekly worksheets are view-only historical files.
+          Aggregates authoritative transactions: retail sales, service logs, and stylist fee / rental payments. Dates use{" "}
+          {SALES_LOG_BUSINESS_TIMEZONE}. Managers can edit source records; archived weekly worksheets are view-only
+          historical files.
         </p>
       </header>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <PeriodNativeCard
-          title="This week (USD equiv.)"
-          retailUsd={analytics.weekRetailUsdCents}
-          serviceUsd={analytics.weekServiceUsdCents}
-          retailNative={analytics.weekNative.retail}
-          serviceNative={analytics.weekNative.service}
-        />
-        <div className="admin-card p-6">
-          <p className="admin-stat-label">Week · rental / space</p>
-          <span className="admin-stat-value">{formatSalonMoney(analytics.weekRentalUsdCents, "USD")}</span>
-          <p className="admin-stat-hint">Operating revenue — not retail gross profit</p>
-          {analytics.rentalUsdCoverage.week.coverageLabel ? (
-            <p className="mt-1 text-[10px] text-amber-200/80">{analytics.rentalUsdCoverage.week.coverageLabel}</p>
-          ) : null}
-        </div>
-        <PeriodNativeCard
-          title="This month (USD equiv.)"
-          retailUsd={analytics.monthRetailUsdCents}
-          serviceUsd={analytics.monthServiceUsdCents}
-          retailNative={analytics.monthNative.retail}
-          serviceNative={analytics.monthNative.service}
-        />
-        <PeriodNativeCard
-          title="Year to date (USD equiv.)"
-          retailUsd={analytics.ytdRetailUsdCents}
-          serviceUsd={analytics.ytdServiceUsdCents}
-          retailNative={analytics.ytdNative.retail}
-          serviceNative={analytics.ytdNative.service}
-        />
-      </div>
+      <SalesLogFilterBar filter={filter} />
+
+      {totalsIncomplete ? (
+        <p className="rounded-xl border border-amber-500/30 bg-amber-500/[0.08] px-4 py-3 text-sm text-amber-50/90">
+          Totals are partial — more matching rows exist than the server safety ceiling. Narrow the date range for exact
+          figures.
+        </p>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="admin-card p-6">
-          <p className="admin-stat-label">Week · retail only</p>
-          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(analytics.weekRetailUsdCents, "USD")}</p>
-        </div>
-        <div className="admin-card p-6">
-          <p className="admin-stat-label">Week · services only</p>
-          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(analytics.weekServiceUsdCents, "USD")}</p>
-        </div>
-        <div className="admin-card p-6">
-          <p className="admin-stat-label">Month · combined</p>
-          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">
-            {formatSalonMoney(analytics.monthRetailUsdCents + analytics.monthServiceUsdCents, "USD")}
-          </p>
-        </div>
-        <div className="admin-card p-6">
-          <p className="admin-stat-label">YTD · combined</p>
-          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-[var(--admin-accent)]">
-            {formatSalonMoney(analytics.ytdRetailUsdCents + analytics.ytdServiceUsdCents, "USD")}
-          </p>
-        </div>
-        <div className="admin-card p-6">
-          <p className="admin-stat-label">Month · rental / space</p>
-          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">{formatSalonMoney(analytics.monthRentalUsdCents, "USD")}</p>
-          {analytics.rentalUsdCoverage.month.coverageLabel ? (
-            <p className="mt-1 text-[10px] text-amber-200/80">{analytics.rentalUsdCoverage.month.coverageLabel}</p>
-          ) : null}
-        </div>
+        {showRetail ? (
+          <div className="admin-card p-6">
+            <p className="admin-stat-label">
+              Retail ({rangeLabel})
+              {totalsIncomplete ? " · partial" : ""}
+            </p>
+            <span className="admin-stat-value">{formatSalonMoney(totals.retailUsdCents, "USD")}</span>
+            <p className="admin-stat-hint">
+              {totals.retailCount} sale{totals.retailCount === 1 ? "" : "s"}
+              {totals.retailNative.USD > 0 || totals.retailNative.LRD > 0
+                ? ` · ${[
+                    totals.retailNative.USD > 0 ? formatSalonMoney(totals.retailNative.USD, "USD") : null,
+                    totals.retailNative.LRD > 0 ? formatSalonMoney(totals.retailNative.LRD, "LRD") : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}`
+                : ""}
+            </p>
+          </div>
+        ) : null}
+        {showServices ? (
+          <div className="admin-card p-6">
+            <p className="admin-stat-label">
+              Services ({rangeLabel})
+              {totalsIncomplete ? " · partial" : ""}
+            </p>
+            <span className="admin-stat-value">{formatSalonMoney(totals.serviceUsdCents, "USD")}</span>
+            <p className="admin-stat-hint">
+              {totals.serviceCount} log{totals.serviceCount === 1 ? "" : "s"}
+              {totals.serviceNative.USD > 0 || totals.serviceNative.LRD > 0
+                ? ` · ${[
+                    totals.serviceNative.USD > 0 ? formatSalonMoney(totals.serviceNative.USD, "USD") : null,
+                    totals.serviceNative.LRD > 0 ? formatSalonMoney(totals.serviceNative.LRD, "LRD") : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}`
+                : ""}
+            </p>
+          </div>
+        ) : null}
+        {showStylistFees ? (
+          <div className="admin-card p-6">
+            <p className="admin-stat-label">
+              Stylist fees ({rangeLabel})
+              {totalsIncomplete ? " · partial" : ""}
+            </p>
+            <span className="admin-stat-value">{formatSalonMoney(totals.rentalUsdCents, "USD")}</span>
+            <p className="admin-stat-hint">
+              {totals.rentalCount} payment{totals.rentalCount === 1 ? "" : "s"} · known USD conversions only
+            </p>
+            {totals.rentalCoverage.coverageLabel ? (
+              <p className="mt-1 text-[10px] text-amber-200/80">{totals.rentalCoverage.coverageLabel}</p>
+            ) : null}
+          </div>
+        ) : null}
+        {showRetail ? (
+          <div className="admin-card p-6">
+            <p className="admin-stat-label">
+              Retail gross profit ({rangeLabel})
+              {totalsIncomplete ? " · partial" : ""}
+            </p>
+            <span className="admin-stat-value text-[var(--admin-accent)]">
+              {totals.retailGrossProfitUsdCents == null
+                ? "Unavailable"
+                : formatSalonMoney(totals.retailGrossProfitUsdCents, "USD")}
+            </span>
+            {totals.retailGrossProfitUsdCents == null ? (
+              <p className="admin-stat-hint">Margin unavailable</p>
+            ) : totals.retailGrossProfitUsdCents === 0 ? (
+              <p className="admin-stat-hint">
+                Break-even
+                {totals.retailMarginPartial ? " · partial" : ""}
+              </p>
+            ) : totals.retailMarginPct != null ? (
+              <p className="admin-stat-hint">
+                Margin {totals.retailMarginPct.toFixed(1)}%
+                {totals.retailMarginPartial ? " · partial" : ""}
+              </p>
+            ) : (
+              <p className="admin-stat-hint">Margin unavailable</p>
+            )}
+            {totals.retailCostCoverageLabel ? (
+              <p className="mt-1 text-[10px] text-white/40">{totals.retailCostCoverageLabel}</p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
-      <SpaceLeasePanel
-        rows={spaceLeaseRows}
-        canManage={canManage}
-        weekRentalUsdCents={analytics.weekRentalUsdCents}
-        monthRentalUsdCents={analytics.monthRentalUsdCents}
-        weekConversionCoverageLabel={analytics.rentalUsdCoverage.week.coverageLabel}
-        monthConversionCoverageLabel={analytics.rentalUsdCoverage.month.coverageLabel}
-      />
-
-      <RecentRetailSalesPanel sales={recentSales} canEdit={canManage} />
-      <RecentServiceLogsPanel logs={recentServices} canEdit={canManage} />
-
-      <section className="admin-card p-6">
-        <h2 className="admin-eyebrow">Revenue trend (14 days, USD)</h2>
-        <div className="mt-6 flex h-36 items-end gap-1 sm:gap-1.5">
-          {trend.length === 0 ? <p className="text-sm text-white/40">No activity yet this year.</p> : null}
-          {trend.map((d) => (
-            <div key={d.day} className="flex h-36 flex-1 flex-col items-center justify-end gap-1">
-              <div
-                className="w-full max-w-[14px] rounded-t-md bg-gradient-to-t from-[#7a3e5c]/90 to-[var(--admin-accent)]/85"
-                style={{ height: `${Math.max(4, Math.round((d.combinedUsdCents / maxBar) * 120))}px` }}
-                title={`${d.day}: ${formatSalonMoney(d.combinedUsdCents, "USD")}`}
-              />
-              <span className="hidden text-[8px] text-white/35 sm:block">{d.day.slice(5)}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <section className="admin-card overflow-x-auto p-6">
-          <h2 className="admin-eyebrow">Top products</h2>
-          <table className="admin-data-table mt-2">
-            <thead>
-              <tr className="border-b border-white/10 text-[10px] uppercase tracking-[0.12em] text-white/40">
-                <th className="py-2">Product</th>
-                <th className="py-2">Qty</th>
-                <th className="py-2 text-right">USD</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analytics.topProducts.map((p) => (
-                <tr key={p.name} className="border-b border-white/[0.06]">
-                  <td className="py-2 text-white">{p.name}</td>
-                  <td className="py-2 text-white/60">{p.qty}</td>
-                  <td className="py-2 text-right text-white/70">{formatSalonMoney(p.revenueUsdCents, "USD")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {!hasRows ? (
+        <section className="admin-card border border-amber-500/20 bg-amber-500/[0.05] p-6">
+          <h2 className="text-sm font-semibold text-white">No records match these filters</h2>
+          <p className="mt-2 max-w-xl text-sm text-white/55">
+            The Sales Log still has data outside this view. Adjust the date range or source, or clear filters to return
+            to this month.
+          </p>
+          <Link
+            href={buildSalesLogHref({ range: "month", source: "all" })}
+            className="mt-4 inline-flex text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]"
+          >
+            Clear filters
+          </Link>
         </section>
-        <section className="admin-card overflow-x-auto p-6">
-          <h2 className="admin-eyebrow">Top services</h2>
-          <table className="admin-data-table mt-2">
-            <thead>
-              <tr className="border-b border-white/10 text-[10px] uppercase tracking-[0.12em] text-white/40">
-                <th className="py-2">Service</th>
-                <th className="py-2">Count</th>
-                <th className="py-2 text-right">USD</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analytics.topServices.map((p) => (
-                <tr key={p.name} className="border-b border-white/[0.06]">
-                  <td className="py-2 text-white">{p.name}</td>
-                  <td className="py-2 text-white/60">{p.count}</td>
-                  <td className="py-2 text-right text-white/70">{formatSalonMoney(p.revenueUsdCents, "USD")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      </div>
+      ) : null}
 
-      <section className="admin-card overflow-x-auto p-6">
-        <h2 className="admin-eyebrow">Daily activity (YTD)</h2>
-        <div className="mt-3 max-h-72 overflow-y-auto">
-          <table className="admin-data-table min-w-[520px]">
-            <thead className="sticky top-0 bg-[var(--admin-card)]">
-              <tr>
-                <th className="py-2">Day</th>
-                <th className="py-2 text-right">Retail USD</th>
-                <th className="py-2 text-right">Service USD</th>
-                <th className="py-2 text-right">Combined</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...analytics.dailyUsd].reverse().map((d) => (
-                <tr key={d.day} className="border-b border-white/[0.06]">
-                  <td className="py-2 text-white">{d.day}</td>
-                  <td className="py-2 text-right text-white/70">{formatSalonMoney(d.retailUsdCents, "USD")}</td>
-                  <td className="py-2 text-right text-white/70">{formatSalonMoney(d.serviceUsdCents, "USD")}</td>
-                  <td className="py-2 text-right text-[var(--admin-accent)]">{formatSalonMoney(d.combinedUsdCents, "USD")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      {showStylistFees ? (
+        <SpaceLeasePanel
+          rows={leaseDisplay}
+          canManage={canManage}
+          weekRentalUsdCents={totals.rentalUsdCents}
+          monthRentalUsdCents={totals.rentalUsdCents}
+          weekLabel={`Filtered total (USD equiv.)`}
+          monthLabel={`Native recorded`}
+          weekConversionCoverageLabel={totals.rentalCoverage.coverageLabel}
+          monthConversionCoverageLabel={
+            totals.rentalNative.USD > 0 || totals.rentalNative.LRD > 0
+              ? [
+                  totals.rentalNative.USD > 0 ? formatSalonMoney(totals.rentalNative.USD, "USD") : null,
+                  totals.rentalNative.LRD > 0 ? formatSalonMoney(totals.rentalNative.LRD, "LRD") : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              : null
+          }
+          emptyMessage="No stylist fee / rental payments in this filter range."
+        />
+      ) : null}
+
+      {showRetail ? (
+        <RecentRetailSalesPanel
+          sales={retailDisplay}
+          canEdit={canManage}
+          returnTo={returnTo}
+          emptyMessage="No retail sales in this filter range."
+        />
+      ) : null}
+
+      {showServices ? (
+        <RecentServiceLogsPanel
+          logs={serviceDisplay}
+          canEdit={canManage}
+          returnTo={returnTo}
+          emptyMessage="No service transactions in this filter range."
+        />
+      ) : null}
 
       {!staff ? (
         <details className="admin-card group border border-white/[0.06] p-5 opacity-90">

@@ -57,6 +57,9 @@ export function SpaceLeasePanel({
   monthRentalUsdCents,
   weekConversionCoverageLabel = null,
   monthConversionCoverageLabel = null,
+  weekLabel = "This week (USD equiv.)",
+  monthLabel = "This month (USD equiv.)",
+  emptyMessage,
 }: {
   rows: SpaceLeasePaymentRow[];
   canManage: boolean;
@@ -64,6 +67,9 @@ export function SpaceLeasePanel({
   monthRentalUsdCents: number;
   weekConversionCoverageLabel?: string | null;
   monthConversionCoverageLabel?: string | null;
+  weekLabel?: string;
+  monthLabel?: string;
+  emptyMessage?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -113,13 +119,13 @@ export function SpaceLeasePanel({
         </div>
         <div className="text-right text-xs text-white/50">
           <p>
-            This week (USD equiv.): <span className="text-white">{formatSalonMoney(weekRentalUsdCents, "USD")}</span>
+            {weekLabel}: <span className="text-white">{formatSalonMoney(weekRentalUsdCents, "USD")}</span>
           </p>
           {weekConversionCoverageLabel ? (
             <p className="mt-0.5 text-[10px] text-amber-200/80">{weekConversionCoverageLabel}</p>
           ) : null}
           <p>
-            This month (USD equiv.): <span className="text-white">{formatSalonMoney(monthRentalUsdCents, "USD")}</span>
+            {monthLabel}: <span className="text-white">{formatSalonMoney(monthRentalUsdCents, "USD")}</span>
           </p>
           {monthConversionCoverageLabel ? (
             <p className="mt-0.5 text-[10px] text-amber-200/80">{monthConversionCoverageLabel}</p>
@@ -304,7 +310,11 @@ export function SpaceLeasePanel({
             })}
           </tbody>
         </table>
-        {rows.length === 0 ? <p className="py-4 text-sm text-white/45">No space lease payments logged yet.</p> : null}
+        {rows.length === 0 ? (
+          <p className="py-4 text-sm text-white/45">
+            {emptyMessage ?? "No space lease payments logged yet."}
+          </p>
+        ) : null}
       </div>
     </section>
   );

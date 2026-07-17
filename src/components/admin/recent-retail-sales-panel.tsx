@@ -5,15 +5,21 @@ import { formatSalonMoney } from "@/lib/admin/salon-format";
 export function RecentRetailSalesPanel({
   sales,
   canEdit,
+  returnTo = "/admin/sales-log",
+  emptyMessage = "No retail sales in this filter range.",
+  title = "Retail sales",
 }: {
   sales: RetailSaleListRow[];
   canEdit: boolean;
+  returnTo?: string;
+  emptyMessage?: string;
+  title?: string;
 }) {
   return (
     <section className="admin-card overflow-x-auto p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">Recent retail sales</h2>
+          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45">{title}</h2>
           <p className="mt-1 text-xs text-white/40">
             Source: sales · Retail sale. {canEdit ? "Managers can edit posted sales." : ""}
           </p>
@@ -58,7 +64,7 @@ export function RecentRetailSalesPanel({
                 {canEdit ? (
                   <td className="py-2 text-right">
                     <Link
-                      href={`/admin/sales/${s.id}/edit?returnTo=${encodeURIComponent("/admin/sales-log")}`}
+                      href={`/admin/sales/${s.id}/edit?returnTo=${encodeURIComponent(returnTo)}`}
                       className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--admin-accent)]"
                     >
                       Edit
@@ -70,7 +76,7 @@ export function RecentRetailSalesPanel({
           })}
         </tbody>
       </table>
-      {sales.length === 0 ? <p className="py-4 text-sm text-white/45">No retail sales in the last 90 days.</p> : null}
+      {sales.length === 0 ? <p className="py-4 text-sm text-white/45">{emptyMessage}</p> : null}
     </section>
   );
 }
